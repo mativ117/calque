@@ -6,15 +6,27 @@ Calque est un site statique qui convertit les PDF et documents scannés en Word 
 
 ## Fonctionnalités
 
-- **Apparence fidèle** : chaque page devient une image dans Word, aux dimensions de la page source. Rendu jusqu’à 216 dpi, limité à 12 millions de pixels par page. Texte non modifiable, fidélité limitée par la résolution.
-- **Texte modifiable** : extraction du texte et de ses tailles avec une mise en page simplifiée ; passage automatique à l’OCR sur les pages sans texte extractible.
-- **Reconnaissance OCR** : toutes les pages sont analysées en français et en anglais, jusqu’à 300 dpi, avec la même limite de pixels. Le texte est produit en Arial 11 ; les polices d’origine ne sont pas reconstituées.
+- **Garder l’apparence** : chaque page devient une image dans Word, aux dimensions de la page source. Rendu jusqu’à 216 dpi, limité à 12 millions de pixels par page. Texte non modifiable, fidélité limitée par la résolution.
+- **Pouvoir modifier le texte** : extraction du texte et de ses tailles avec une mise en page simplifiée ; passage automatique à l’OCR sur les pages sans texte extractible.
+- **Option de reprise « Relire toutes les pages comme des images »**, dans l’aide « Le texte récupéré est incomplet ? » : toutes les pages sont analysées en français, anglais et néerlandais, jusqu’à 300 dpi, avec la même limite de pixels. Le texte est produit en Arial 11 ; les polices d’origine ne sont pas reconstituées.
 - Mots OCR dont le score est inférieur à **85/100**, ou sans score valide, surlignés en jaune. Bilan des pages concernées. Une page sans texte reconnu reçoit une note explicite dans le Word et le bilan.
 - Téléchargement explicite du `.docx`, progression, annulation, retrait du document et interface responsive.
 
 Le score OCR n’est pas une probabilité d’exactitude. Une erreur ou une omission peut passer sans alerte : relire le texte, en particulier les chiffres, noms et dates. Un Word entièrement modifiable et strictement identique à n’importe quel PDF ne peut pas être garanti. Colonnes, tableaux, images et positions ne sont pas reconstruits dans les modes texte/OCR.
 
 Limites : **50 Mo, 150 pages**, dimensions de page entre 2,54 et 55,88 cm par côté, pas de PDF protégé par mot de passe. PDF uniquement, y compris scans et documents mixtes ; pas de JPEG/PNG directement. Les gros documents peuvent épuiser la mémoire disponible. Les navigateurs modernes avec WebAssembly et Web Workers sont nécessaires. Chromium a été testé ; la compatibilité complète des autres navigateurs reste à vérifier.
+
+## Langues et compréhension
+
+L’interface est disponible en **français, anglais et néerlandais**. Les descriptions expliquent le résultat attendu, sans jargon. Les deux choix principaux sont « Garder l’apparence » (images non modifiables) et « Pouvoir modifier le texte » (reconnaissance des scans automatique). La reprise de toutes les pages est proposée dans une aide repliable si le premier résultat est incomplet.
+
+Le sélecteur de langue traduit la navigation, les descriptions, les erreurs, la progression, les alertes et les notes ajoutées au Word. Le PDF reste sélectionné lorsque l’utilisateur change de langue ; un éventuel résultat précédent est libéré pour pouvoir le recréer avec les notes dans la nouvelle langue. Le sélecteur est désactivé pendant la conversion.
+
+La langue initiale suit le navigateur, avec repli français. Les liens `?lang=fr`, `?lang=en` et `?lang=nl` permettent de choisir explicitement. Cette préférence est seulement dans l’URL, sans cookie ni stockage local.
+
+**La langue de l’interface ne limite pas celle du document.** Le moteur reconnaît simultanément les scans en français, anglais et néerlandais, y compris un document multilingue. Les PDF contenant déjà du texte sont extraits sans limitation à ces trois langues, selon les polices et encodages pris en charge par PDF.js. Calque ne traduit pas le contenu : les mots restent dans leur langue d’origine. Les notes de relecture ajoutées dans le Word sont dans la langue choisie pour le site au lancement de la conversion.
+
+Les textes sont centralisés dans `src/i18n.js`. La complétude des traductions et leurs paramètres sont testés. Les licences tierces restent dans leur texte original.
 
 ## Développement
 
@@ -56,8 +68,8 @@ CI=1 npm test
 
 En local Linux avec Chromium installé : `npm test`. Pour un autre emplacement, définir `CHROMIUM_PATH`. Les tests génèrent uniquement des documents factices. Les captures d’interface sont produites dans `tests/`, hors du dépôt.
 
-- Tests unitaires : mot incertain surligné, conservation du mot fiable sans surlignage, page concernée, score invalide et données OCR sans scores.
-- Tests navigateur : rendu desktop/mobile, deux tailles de pages, images intégrées sans lien externe, extraction du texte, OCR réel d’un scan, page sans texte reconnue, erreur sur PDF invalide et annulation.
+- Tests unitaires : traductions complètes et paramètres identiques, choix de langue, notes Word traduites sans traduction du document, mot incertain surligné, conservation du mot fiable sans surlignage, page concernée, score invalide et données OCR sans scores.
+- Tests navigateur : descriptions sans jargon, rendu desktop/mobile dans les trois langues, erreurs traduites, changement de langue avec PDF conservé, scan multilingue réel et interface anglaise, deux tailles de pages, images intégrées sans lien externe, extraction du texte, OCR réel d’un scan, page sans texte reconnue, erreur sur PDF invalide et annulation.
 - Le scénario OCR vérifie les requêtes : même origine uniquement, méthodes GET/HEAD uniquement ; localStorage, sessionStorage et IndexedDB restent vides.
 
 Ces tests ne remplacent pas un audit de sécurité ou une vérification visuelle des Word dans Microsoft Word.

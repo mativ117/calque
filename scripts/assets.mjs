@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 const target = new URL('../public/ocr/', import.meta.url);
 await mkdir(target, { recursive: true });
 const models = {
+  nld: 'ced0e5e046a84c908a6aa7accbef9a232c4a5d9a8276691b81c6ee64d02963f6',
   fra: 'ced037562e8c80c13122dece28dd477d399af80911a28791a66a63ac1e3445ca',
   eng: '7d4322bd2a7749724879683fc3912cb542f19906c83bcc1a52132556427170b2',
 };

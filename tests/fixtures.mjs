@@ -25,11 +25,11 @@ export async function fixtures(browser) {
   stream('BT /F1 14 Tf 30 200 Td (Deuxieme page) Tj ET'),
  ]));
  const page=await browser.newPage();
- for(const [file,blank] of [['scan.pdf',false],['vide.pdf',true]]) {
+ for(const [file,blank] of [['scan.pdf',false],['vide.pdf',true],['multilingue.pdf','multi']]) {
   const data=await page.evaluate(blank=>{
    const canvas=document.createElement('canvas');canvas.width=1654;canvas.height=2339;
    const context=canvas.getContext('2d');context.fillStyle='white';context.fillRect(0,0,1654,2339);
-   if(!blank){context.fillStyle='black';context.font='42px Arial';context.fillText('Bonjour document confidentiel 12345',120,240);}
+   if(blank!==true){context.fillStyle='black';context.font='42px Arial';context.fillText('Bonjour document confidentiel 12345',120,240);if(blank==='multi'){context.fillText('Please review the confidential document.',120,340);context.fillText('De vergadering begint om negen uur.',120,440);}}
    return canvas.toDataURL('image/jpeg',.95).split(',')[1];
   },blank);
   await writeFile(`tests/fixtures/${file}`,pdf([

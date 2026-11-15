@@ -1,6 +1,7 @@
 import * as pdfjs from 'pdfjs-dist';
 import pdfWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import { createWorker } from 'tesseract.js';
+import { translator, UserError } from './i18n.js';
 import { Document, Packer, Paragraph, TextRun, ImageRun, SectionType, PageOrientation } from 'docx';
 
 pdfjs.GlobalWorkerOptions.workerSrc = pdfWorker;
@@ -14,8 +15,8 @@ const MAX_PIXELS = 12_000_000;
 export function checkAbort(signal) {
   if (signal?.aborted) throw new DOMException('Conversion annulée.', 'AbortError');
 }
-export async function openPdf(file, signal) {
-  if (!file.size || file.size > MAX_BYTES) throw new Error('Choisissez un PDF non vide de 50 Mo maximum.');
+export async function openPdf(file, signal, t = translator('fr')) {
+  if (!file.size || file.size > MAX_BYTES) throw new UserError(t('errorSize'));
   checkAbort(signal);
   const data = new Uint8Array(await file.arrayBuffer());
   checkAbort(signal);
@@ -28,19 +29,19 @@ export async function openPdf(file, signal) {
   try {
     const pdf = await task.promise;
     checkAbort(signal);
-    if (pdf.numPages > MAX_PAGES) { await pdf.destroy(); throw new Error('Ce PDF dépasse la limite de 150 pages.'); }
+    if (pdf.numPages > MAX_PAGES) { await pdf.destroy(); throw new UserError(t('errorPages')); }
     return pdf;
   } catch (error) {
     checkAbort(signal);
-    if (error.name === 'PasswordException') throw new Error('Ce PDF est protégé par un mot de passe. Utilisez une copie déverrouillée.');
-    if (error.message?.includes('150 pages')) throw error;
-    throw new Error('Impossible de lire ce PDF. Il est peut-être endommagé ou dans un format non pris en charge.');
+    if (error.name === 'PasswordException') throw new UserError(t('errorPassword'));
+    if (error instanceof UserError) throw error;
+    throw new UserError(t('errorRead'));
   } finally { signal?.removeEventListener('abort', abort); }
 }
-function dimensions(page) {
+function dimensions(page, t) {
   const view = page.getViewport({ scale: 1 });
   if (Math.min(view.width, view.height) < 72 || Math.max(view.width, view.height) > 1584)
-    throw new Error('Dimensions incompatibles avec Word : chaque côté doit mesurer entre 2,54 et 55,88 cm.');
+    throw new UserError(t('errorDimensions'));
   return view;
 }
 function properties(view, faithful) {
@@ -65,11 +66,11 @@ async function render(page, view, signal, dpi) {
   catch (error) { canvas.width = canvas.height = 0; checkAbort(signal); throw error; }
   finally { signal?.removeEventListener('abort', abort); }
 }
-async function imageParagraph(page, view, signal) {
+async function imageParagraph(page, view, signal, t) {
   const canvas = await render(page, view, signal, 216);
   try {
     const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
-    if (!blob) throw new Error('Le navigateur ne peut pas générer l’image de cette page.');
+    if (!blob) throw new UserError(t('errorImage'));
     const data = new Uint8Array(await blob.arrayBuffer());
     checkAbort(signal);
     return new Paragraph({ spacing: { before: 0, after: 0, line: 20 }, children: [new ImageRun({
@@ -96,8 +97,8 @@ function nativeText(content) {
   }
   flush(); return children;
 }
-export async function convertPdf(pdf, mode, { signal, onProgress = () => {} } = {}) {
-  if (!['faithful', 'editable', 'ocr'].includes(mode)) throw new Error('Mode de conversion inconnu.');
+export async function convertPdf(pdf, mode, { signal, onProgress = () => {}, t = translator('fr') } = {}) {
+  if (!['faithful', 'editable', 'ocr'].includes(mode)) throw new UserError(t('errorMode'));
   const sections = []; const alerts = []; let worker; let currentPage = 0; let ocrPages = 0;
   const stopWorker = () => { if (worker) void worker.terminate(); };
   signal?.addEventListener('abort', stopWorker, { once: true });
@@ -105,27 +106,27 @@ export async function convertPdf(pdf, mode, { signal, onProgress = () => {} } = 
     for (let number = 1; number <= pdf.numPages; number++) {
       currentPage = number;
       checkAbort(signal);
-      onProgress({ page: number, total: pdf.numPages, progress: (number - 1) / pdf.numPages * 95, phase: 'Conversion' });
+      onProgress({ page: number, total: pdf.numPages, progress: (number - 1) / pdf.numPages * 95, phase: t('phaseConvert') });
       const page = await pdf.getPage(number);
       try {
-        const view = dimensions(page);
+        const view = dimensions(page, t);
         let children;
-        if (mode === 'faithful') children = [await imageParagraph(page, view, signal)];
+        if (mode === 'faithful') children = [await imageParagraph(page, view, signal, t)];
         else {
           const content = mode === 'editable' ? await page.getTextContent() : null;
           const native = content?.items.some(item => 'str' in item && item.str.trim());
           if (native) children = nativeText(content);
           else {
             if (!worker) {
-              onProgress({ page: number, total: pdf.numPages, progress: (number - 1) / pdf.numPages * 95, phase: 'Chargement du moteur OCR local' });
+              onProgress({ page: number, total: pdf.numPages, progress: (number - 1) / pdf.numPages * 95, phase: t('phaseLoad') });
               // Tous les chemins sont explicitement sur la même origine. Aucun cache IndexedDB.
-              worker = await createWorker('fra+eng', 1, {
+              worker = await createWorker('fra+eng+nld', 1, {
                 workerPath: resource('ocr/worker.min.js'), corePath: resource('ocr/'), langPath: resource('ocr/'),
                 workerBlobURL: false, gzip: false, cacheMethod: 'none',
                 errorHandler: () => {},
                 logger: message => {
                   if (message.status === 'recognizing text') onProgress({ page: number, total: pdf.numPages,
-                    progress: ((number - 1 + message.progress * .9) / pdf.numPages) * 95, phase: 'Reconnaissance OCR' });
+                    progress: ((number - 1 + message.progress * .9) / pdf.numPages) * 95, phase: t('phaseRead') });
                 },
               });
               checkAbort(signal);
@@ -135,7 +136,7 @@ export async function convertPdf(pdf, mode, { signal, onProgress = () => {} } = 
             try {
               const { data } = await worker.recognize(canvas, {}, { text: true, blocks: true });
               checkAbort(signal);
-              const recognized = ocrParagraphs(data, number);
+              const recognized = ocrParagraphs(data, number, t);
               children = recognized.children;
               if (recognized.alert) alerts.push(recognized.alert);
               ocrPages++;
@@ -148,7 +149,7 @@ export async function convertPdf(pdf, mode, { signal, onProgress = () => {} } = 
       await new Promise(resolve => setTimeout(resolve, 0));
     }
     checkAbort(signal);
-    onProgress({ page: pdf.numPages, total: pdf.numPages, progress: 97, phase: 'Création du Word' });
+    onProgress({ page: pdf.numPages, total: pdf.numPages, progress: 97, phase: t('phaseWord') });
     const document = new Document({ creator: '', lastModifiedBy: '', title: '', description: '',
       styles: { default: { document: { run: { font: 'Arial', size: 22 }, paragraph: { spacing: { after: 0 } } } } }, sections });
     const blob = await Packer.toBlob(document);
@@ -156,7 +157,7 @@ export async function convertPdf(pdf, mode, { signal, onProgress = () => {} } = 
     return { blob, alerts, ocrPages, pages: pdf.numPages };
   } catch (error) {
     checkAbort(signal);
-    throw new Error(`Page ${currentPage || 1} : ${error.message || 'conversion impossible. Essayez un document plus petit ou le mode fidèle.'}`);
+    throw new UserError(t('errorAtPage', { page: currentPage || 1, message: error instanceof UserError ? error.message : t('errorGeneric') }));
   } finally {
     signal?.removeEventListener('abort', stopWorker);
     if (worker) await worker.terminate();

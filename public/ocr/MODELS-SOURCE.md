@@ -9,3 +9,5 @@ Fichiers téléchargés depuis `https://raw.githubusercontent.com/tesseract-ocr/
 - Licence Apache 2.0 : fichier `LICENSE` adjacent.
 
 Distribuer ce dossier avec l'application. Le moteur Tesseract est fourni par la dépendance tesserocr ; conserver aussi les notices de cette bibliothèque et de ses composants natifs.
+
+- `nld.traineddata` SHA-256 : `ced0e5e046a84c908a6aa7accbef9a232c4a5d9a8276691b81c6ee64d02963f6` (same official 4.1.0 source; Apache 2.0).

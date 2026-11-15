@@ -10,6 +10,7 @@ async function select(page, file) {
  await expect(page.locator('#convert')).toBeEnabled();
 }
 async function convert(page, mode) {
+ if(mode === 'ocr') await page.locator('#advanced').evaluate(element=>element.open=true);
  await page.locator(`input[value="${mode}"]`).check();
  await page.locator('#convert').click();
  await expect(page.locator('#result')).toBeVisible({timeout: 100_000});
@@ -61,7 +62,7 @@ test('OCR réel sur scan, uniquement requêtes locales en lecture, sans stockage
  const zip=await convert(page,'ocr');
  const xml=await zip.file('word/document.xml').async('string');
  expect(xml).toContain('Bonjour'); expect(xml).toContain('confidentiel');
- expect(xml).toContain('Page source 1');
+ expect(xml).toContain("Page d’origine 1");
  expect(external).toEqual([]); expect(writes).toEqual([]); expect(errors).toEqual([]);
  expect(await page.evaluate(async()=>({local:localStorage.length,session:sessionStorage.length,db:(await indexedDB.databases()).length}))).toEqual({local:0,session:0,db:0});
 });
@@ -77,10 +78,49 @@ test('PDF invalide et annulation de l’OCR',async({page})=>{
  await expect(page.locator('#error')).toContainText('Impossible de lire');
  await expect(page.locator('#convert')).toBeDisabled();
  await select(page,'scan.pdf');
+ await page.locator('#advanced').evaluate(element=>element.open=true);
  await page.locator('input[value="ocr"]').check();
  await page.locator('#convert').click();
  await page.locator('#cancel').click();
  await expect(page.locator('#status')).toContainText('annulée');
  await expect(page.locator('#result')).toBeHidden();
  await expect(page.locator('#convert')).toBeEnabled();
+});
+
+for(const [language, title, error] of [
+ ['fr','Garder l’apparence','Impossible de lire'],
+ ['en','Keep the page appearance','could not be read'],
+ ['nl','De opmaak behouden','kon niet worden gelezen'],
+]) test(`interface ${language} compréhensible, responsive et erreurs traduites`,async({page})=>{
+ await page.goto(`./?lang=${language}`);
+ await expect(page.locator('html')).toHaveAttribute('lang',language);
+ await expect(page.getByRole('radio',{name:title,exact:true})).toBeVisible();
+ expect(await page.locator('input[name="mode"]:visible').count()).toBe(2);
+ expect(await page.locator('body').innerText()).not.toMatch(/\bOCR\b/);
+ for(const width of [390,768,1440]) {
+  await page.setViewportSize({width,height:900});
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+ }
+ await page.setViewportSize({width:390,height:844});
+ await page.screenshot({path:`tests/interface-mobile-${language}.png`,fullPage:true});
+ await page.locator('#file').setInputFiles('tests/fixtures/invalide.pdf');
+ await expect(page.locator('#error')).toContainText(error);
+});
+test('changer de langue conserve le PDF sélectionné et traduit le résultat',async({page})=>{
+ await page.goto('./?lang=fr');await select(page,'texte.pdf');
+ await page.locator('#language').selectOption('nl');
+ await expect(page.locator('#file-title')).toHaveText('texte.pdf');
+ await expect(page.locator('#convert')).toBeEnabled();
+ await expect(page).toHaveURL(/lang=nl/);
+ await convert(page,'editable');
+ await expect(page.locator('#result-title')).toHaveText('Uw Word-document is klaar.');
+ await expect(page.locator('#status')).toContainText('Word-bestand downloaden');
+});
+test('un scan français, anglais et néerlandais est reconnu avec une interface anglaise',async({page})=>{
+ await page.goto('./?lang=en');await select(page,'multilingue.pdf');
+ const zip=await convert(page,'editable');
+ const xml=await zip.file('word/document.xml').async('string');
+ expect(xml).toContain('Bonjour');expect(xml).toContain('Please');expect(xml).toContain('vergadering');expect(xml).toContain('negen');
+ expect(xml).toContain('Original page 1');
+ await expect(page.locator('#result-summary')).toContainText('original PDF');
 });
