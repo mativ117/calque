@@ -1,3 +1,4 @@
+import { documentMessages } from './document-messages.js';
 // Textes de l’interface et des notes Word. Aucune donnée utilisateur n’est stockée ici.
 export const messages = {
  fr: {
@@ -103,6 +104,7 @@ export const messages = {
   wordPrefix:'Oorspronkelijke pagina {page} — De scan lezen: ', wordEmpty:'Geen tekst herkend: lege pagina of onleesbare scan. Controleer de oorspronkelijke PDF.', wordUncertain:'{count} woord(en) om te controleren in het geel. Lees ook de rest van de tekst na.', wordReview:'Tekst herkend. Nalezen blijft nodig.',
  },
 };
+for (const language of ['fr','en','nl']) Object.assign(messages[language], documentMessages[language]);
 export function translator(language = 'fr') {
  const dictionary = Object.hasOwn(messages, language) ? messages[language] : messages.fr;
  return (key, values = {}) => {

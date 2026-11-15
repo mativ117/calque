@@ -7,17 +7,17 @@
     "dev": "vite --host 0.0.0.0",
     "build": "node scripts/assets.mjs && vite build",
     "preview": "vite preview --host 0.0.0.0",
-    "test": "node --test tests/ocr-format.test.mjs && playwright test"
+    "test": "node --test tests/*.test.mjs && playwright test"
   },
   "dependencies": {
     "pdfjs-dist": "5.4.394",
     "docx": "9.5.1",
-    "tesseract.js": "6.0.1"
+    "tesseract.js": "6.0.1",
+    "jszip": "3.10.1"
   },
   "devDependencies": {
     "vite": "7.2.2",
-    "@playwright/test": "1.56.1",
-    "jszip": "3.10.1"
+    "@playwright/test": "1.56.1"
   },
   "description": "Conversion PDF et scans vers Word dans le navigateur, sans envoi de documents."
 }

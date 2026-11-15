@@ -12,3 +12,5 @@ tests/fixtures/
 tests/interface-*.png
 
 public/THIRD-PARTY.txt
+
+tests/private-corpus/

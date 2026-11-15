@@ -24,6 +24,12 @@ export async function fixtures(browser) {
   stream('BT /F1 14 Tf 30 200 Td (Bonjour confidentiel) Tj ET'),
   stream('BT /F1 14 Tf 30 200 Td (Deuxieme page) Tj ET'),
  ]));
+ await writeFile('tests/fixtures/tableau.pdf',pdf([
+  '<< /Type /Catalog /Pages 2 0 R >>','<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+  '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>',
+  '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+  stream('0 0 0 RG 1 w 50 600 450 140 re S 50 670 m 500 670 l S 275 600 m 275 740 l S BT /F1 14 Tf 65 705 Td (Article) Tj 230 0 Td (Montant) Tj -230 -70 Td (Facture test) Tj 230 0 Td (123 EUR) Tj ET'),
+ ]));
  const page=await browser.newPage();
  for(const [file,blank] of [['scan.pdf',false],['vide.pdf',true],['multilingue.pdf','multi']]) {
   const data=await page.evaluate(blank=>{
@@ -38,6 +44,22 @@ export async function fixtures(browser) {
    stream('q 595 0 0 842 0 0 cm /Im1 Do Q'),
    stream(Buffer.from(data,'base64'),'/Type /XObject /Subtype /Image /Width 1654 /Height 2339 /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode'),
   ]));
+ }
+ for(const [file,kind] of [['document.png','clear'],['document.jpg','clear'],['sombre.png','dark'],['tourne.png','rotated'],['faible.png','small'],['flou.png','blur']]) {
+  const data=await page.evaluate(kind=>{
+   const c=document.createElement('canvas');c.width=kind==='small'?600:1654;c.height=kind==='small'?820:2339;
+   const ctx=c.getContext('2d');ctx.fillStyle=kind==='dark'?'#333':'white';ctx.fillRect(0,0,c.width,c.height);
+   if(kind==='rotated'){ctx.translate(c.width/2,c.height/2);ctx.rotate(Math.PI/2);ctx.translate(-c.height/2,-c.width/2);}
+   ctx.fillStyle=kind==='dark'?'#777':'black';ctx.font=kind==='small'?'25px Arial':'42px Arial';
+   if(kind==='blur')ctx.filter='blur(5px)';
+   ctx.fillText('Bonjour document confidentiel 12345',40,240);
+   ctx.fillText('Please review the document.',40,330);
+   return c.toDataURL('image/png').split(',')[1];
+  },kind);
+  if(file.endsWith('.jpg')) {
+   const jpg=await page.evaluate(async(data)=>{const img=new Image();img.src='data:image/png;base64,'+data;await img.decode();const c=document.createElement('canvas');c.width=img.width;c.height=img.height;c.getContext('2d').drawImage(img,0,0);return c.toDataURL('image/jpeg',.95).split(',')[1];},data);
+   await writeFile('tests/fixtures/'+file,Buffer.from(jpg,'base64'));
+  }else await writeFile('tests/fixtures/'+file,Buffer.from(data,'base64'));
  }
  await page.close();
  await writeFile('tests/fixtures/invalide.pdf','not a pdf');
