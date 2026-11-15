@@ -2,7 +2,7 @@
 
 **Du PDF au Word, en toute confidentialité.**
 
-Calque est un site statique qui convertit les PDF et documents scannés en Word dans le navigateur. Les documents et le texte reconnu ne sont pas envoyés à un serveur. Il fonctionne sur GitHub Pages, sans compte, API de conversion, backend ou clé secrète.
+Calque transforme vos PDF et scans en documents Word, simplement et en toute confidentialité. Gardez l’apparence de vos pages ou retrouvez un texte que vous pouvez modifier.
 
 ## Fonctionnalités
 
