@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="Calque transforme vos PDF et scans en Word dans votre navigateur, sans envoyer vos documents à un serveur." />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; connect-src 'self'; img-src 'self' blob: data:; style-src 'self' 'unsafe-inline'; font-src 'self'; object-src 'none'; base-uri 'self'; form-action 'none'" />
+  <meta name="referrer" content="no-referrer" />
+  <meta name="theme-color" content="#f4f3ef" />
+  <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
+  <title>Calque — Du PDF au Word, en toute confidentialité</title>
+</head>
+<body>
+  <header class="header wrap">
+    <a class="brand" href="./" aria-label="Calque, accueil"><span class="brand-icon" aria-hidden="true">▱</span>calque<span class="brand-dot">.</span></a>
+    <nav aria-label="Navigation"><a href="#fonctionnement">Comment ça marche</a><a href="#confidentialite">Confidentialité</a><a href="https://github.com/mativ117/calque" target="_blank" rel="noopener noreferrer" class="source-link">Code source <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 18 18 6M6 6h12v12"/></svg></a></nav>
+  </header>
+  <main class="wrap">
+    <section class="hero">
+      <div class="hero-copy"><p class="eyebrow"><span class="green-dot"></span> VOS DOCUMENTS RESTENT LES VÔTRES</p>
+        <h1>Changez le format.<br><span>Gardez le contrôle.</span></h1>
+        <p class="intro">Vos PDF et scans deviennent des documents Word.<br class="desktop-break"> La conversion se fait ici, sur votre appareil.</p>
+        <div class="hero-tags"><span><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 18 18 6M6 6h12v12"/></svg> Sans inscription</span><span>◈ Traitement local</span><span>✓ Gratuit</span></div>
+      </div>
+      <div class="illustration" aria-hidden="true"><span class="illustration-orbit"></span><div class="paper paper-back"><span class="paper-type">PDF</span><div class="fake-lines"></div><div class="fake-box"></div><div class="fake-lines short"></div></div><span class="transfer"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 18 18 6M6 6h12v12"/></svg></span><div class="paper paper-front"><span class="paper-type word">WORD</span><div class="fake-lines"></div><div class="fake-lines short"></div><span class="fake-highlight"></span><div class="fake-lines"></div><span class="paper-check">✓</span></div><span class="local-label"><span class="green-dot"></span> Conversion sur votre appareil</span></div>
+    </section>
+    <section class="workspace" aria-labelledby="converter-title">
+      <div class="workspace-heading"><div><p class="eyebrow">VOTRE ESPACE DE CONVERSION</p><h2 id="converter-title">Un document. Quelques clics.</h2></div><span class="private-badge">◈ Aucun document envoyé</span></div>
+      <div class="converter-grid">
+        <div class="input-column"><div class="step-label"><span>01</span><h3>Votre document</h3></div>
+          <input id="file" type="file" accept="application/pdf,.pdf" class="visually-hidden" />
+          <button type="button" id="dropzone" class="dropzone"><span class="upload-icon" aria-hidden="true">↑</span><strong id="file-title">Déposez votre PDF ici</strong><span id="file-meta">ou cliquez pour choisir un fichier</span><small>PDF uniquement · 50 Mo maximum · 150 pages</small></button>
+          <div id="selected-actions" class="selected-actions" hidden><button type="button" id="replace" class="text-button">Changer de document</button><button type="button" id="clear" class="text-button">Retirer</button></div>
+          <div class="local-note"><span aria-hidden="true">◈</span><p>Votre fichier reste dans ce navigateur.<br>Il sera libéré à la fermeture de cet onglet.</p></div>
+        </div>
+        <div class="options-column"><div class="step-label"><span>02</span><h3>Votre résultat</h3></div>
+          <fieldset id="modes"><legend class="visually-hidden">Choisir le mode de conversion</legend>
+            <label class="mode-card"><input type="radio" name="mode" value="faithful" checked /><span><strong>Apparence fidèle <small>VISUEL</small></strong><span>Conservez l’apparence des pages sous forme d’images dans Word. Texte non modifiable.</span></span></label>
+            <label class="mode-card"><input type="radio" name="mode" value="editable" /><span><strong>Texte modifiable <small>ÉDITION</small></strong><span>Récupérez le texte du PDF. Les pages scannées passent automatiquement par l’OCR.</span></span></label>
+            <label class="mode-card"><input type="radio" name="mode" value="ocr" /><span><strong>Reconnaissance OCR <small>SCANS</small></strong><span>Analysez toutes les pages en français et en anglais. Les mots incertains sont surlignés.</span></span></label>
+          </fieldset>
+          <p id="mode-note" class="mode-note">Le rendu est une image haute résolution. Un léger écart reste possible au zoom ou à l’impression.</p>
+        </div>
+      </div>
+      <div class="conversion-footer"><div class="status-area"><p id="status" role="status" aria-live="polite">Choisissez un PDF pour commencer.</p><progress id="progress" max="100" value="0" hidden aria-label="Progression de la conversion"></progress></div><button id="cancel" class="secondary-button" hidden>Annuler</button><button id="convert" class="primary-button" disabled>Convertir en Word <span aria-hidden="true"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 18 18 6M6 6h12v12"/></svg></span></button></div>
+      <div id="error" class="error-box" role="alert" hidden></div>
+      <section id="result" class="result" hidden aria-labelledby="result-title"><div class="result-top"><div><p class="eyebrow">CONVERSION TERMINÉE</p><h3 id="result-title">Votre Word est prêt.</h3><p id="result-summary"></p></div><a id="download" class="primary-button" download>Télécharger le Word ↓</a></div><div id="alerts" hidden><h4>À vérifier dans votre document</h4><p>Les mots dont le score OCR est inférieur à 85/100 sont en jaune. Une erreur peut aussi passer sans alerte : relisez toujours le résultat.</p><ul id="alert-list"></ul></div></section>
+    </section>
+    <section class="explain-grid" id="fonctionnement"><article><span class="feature-number">01 / SIMPLE</span><h3>Du fichier au document.</h3><p>Choisissez votre PDF, sélectionnez le résultat souhaité, puis téléchargez votre Word. Aucun compte à créer.</p></article><article><span class="feature-number">02 / LISIBLE</span><h3>Les scans aussi.</h3><p>La reconnaissance de caractères récupère le texte des pages scannées. Les mots incertains sont signalés pour guider votre relecture.</p></article><article><span class="feature-number">03 / TRANSPARENT</span><h3>La fidélité a ses limites.</h3><p>Un Word modifiable peut différer de l’original. Colonnes, tableaux, images et polices ne sont pas reconstruits à l’identique.</p></article></section>
+    <section class="privacy" id="confidentialite"><div><p class="eyebrow">CONÇU POUR RESTER LOCAL</p><h2>Vos fichiers ne font<br>pas le voyage.</h2></div><div><p>Calque n’envoie ni vos PDF ni leur contenu à un serveur. La conversion et la reconnaissance de texte se font dans votre navigateur, sans historique, cookies de suivi ou statistiques ajoutés.</p><p>Le site et ses composants sont servis par GitHub Pages, qui peut conserver des journaux de connexion. Le navigateur et votre système peuvent garder leurs propres traces. Choisissez un dossier non synchronisé pour conserver le Word localement.</p><a href="https://github.com/mativ117/calque" target="_blank" rel="noopener noreferrer">Consulter le fonctionnement dans le code <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 18 18 6M6 6h12v12"/></svg></a></div></section>
+    <section class="faq"><h2>Quelques réponses utiles.</h2><details><summary>Le Word sera-t-il exactement identique au PDF ?</summary><p>Le mode fidèle place des images des pages dans Word. Leur apparence est conservée à la résolution du rendu, mais leur texte ne peut pas être modifié. Les modes texte et OCR créent un texte éditable avec une mise en page simplifiée. Aucun mode ne garantit un document à la fois parfaitement identique et entièrement modifiable.</p></details><details><summary>Que signifient les mots surlignés en jaune ?</summary><p>Le moteur OCR leur attribue un score inférieur à 85/100. Ce n’est pas une probabilité d’exactitude : vérifiez aussi les mots non surlignés, les chiffres, les noms et les éventuelles omissions. Une page sans texte reconnu est signalée dans le bilan et le Word.</p></details><details><summary>Puis-je utiliser Calque hors connexion ?</summary><p>Le site a besoin d’une connexion pour charger ses composants, dont le moteur OCR lors de sa première utilisation dans l’onglet. Aucun document ne fait partie de ces requêtes. Calque ne propose pas encore d’installation hors ligne ; utilisez la version de bureau si vous avez besoin d’un fonctionnement entièrement déconnecté.</p></details><details><summary>Quels documents sont acceptés ?</summary><p>Les PDF jusqu’à 50 Mo et 150 pages, y compris les scans et documents mixtes. Les PDF protégés par mot de passe sont refusés. Les manuscrits, scans flous et documents complexes peuvent donner de mauvais résultats. Les gros fichiers peuvent dépasser la mémoire disponible ; essayez alors un PDF plus petit.</p></details></section>
+  </main>
+  <footer class="footer wrap"><a class="brand" href="./">calque<span class="brand-dot">.</span></a><span>Le format change. Vos fichiers restent chez vous.</span><a href="./THIRD-PARTY.txt" target="_blank" rel="noopener noreferrer" class="notices">Licences</a><a href="https://github.com/mativ117/calque" target="_blank" rel="noopener noreferrer">GitHub <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 18 18 6M6 6h12v12"/></svg></a></footer>
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>

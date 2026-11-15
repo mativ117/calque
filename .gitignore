@@ -1,0 +1,14 @@
+node_modules/
+dist/
+test-results/
+playwright-report/
+public/ocr/*
+!public/ocr/MODELS-LICENSE
+!public/ocr/MODELS-SOURCE.md
+
+public/pdfjs/
+
+tests/fixtures/
+tests/interface-*.png
+
+public/THIRD-PARTY.txt
