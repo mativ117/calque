@@ -72,3 +72,17 @@ CI=1 npm test
 `CHROMIUM_PATH` peut désigner un autre binaire. Les tests génèrent des documents fictifs uniquement. Ils couvrent notamment : sources de dimensions différentes, JPEG/PNG, scan multilingue, image sombre, image de petite taille, rotation, page vide, tableau non reconstruit signalé, mauvais format, fichier invalide, annulation, limites de pixels, comparaison, traduction et contrôle de structure Word.
 
 Le test de confidentialité observe les requêtes même origine et GET/HEAD uniquement ; localStorage, sessionStorage et IndexedDB restent vides. Les captures vont dans `tests/interface-*.png`, hors du dépôt. Cela ne remplace pas un audit ou un essai sur un corpus réel.
+
+
+## Documents longs : limites et gestion mémoire
+
+Les limites restent **50 Mo par fichier et 150 pages par PDF**. L’aide de l’interface distingue la taille du fichier du nombre de pages et explique que le contenu et l’appareil influencent le coût du traitement. Une réussite sur un document ne garantit pas les mêmes capacités sur un autre.
+
+- Conversion de toutes les pages par défaut ; intervalle facultatif pour travailler par étapes, sans modifier la source. Le Word partiel, son nom et le bilan indiquent l’intervalle ; les notes conservent les numéros source. Les pages non incluses sont explicitement signalées dans la comparaison.
+- Lecture FileReader annulable dès l’ouverture. L’annulation pendant la conversion se produit au prochain point de contrôle ; l’assemblage ZIP final n’est pas un processus immédiatement interruptible.
+- Progression par page source, nombre de pages sélectionnées traitées et temps écoulé réel, sans estimation artificielle de la durée restante.
+- Rendu de l’aperçu uniquement pour la page consultée ; images de travail libérées après chaque page. Nettoyage PDF global demandé toutes les huit pages, moteur de lecture recréé après douze pages scannées si d’autres pages restent.
+- Objets de construction du Word libérés avant la validation ; XML vérifié progressivement avec le lecteur sax déjà utilisé par les dépendances, sans construire un arbre DOM pour tout le document.
+- Garde-fou supplémentaire de 2 000 000 unités UTF-16 de texte par conversion, pour limiter les documents anormalement denses. Un dépassement demande un intervalle plus court ou une copie plus légère. Ce garde-fou ne garantit pas l’absence d’épuisement mémoire.
+
+Les scénarios synthétiques comprennent un PDF texte de 150 pages avec vérification de chaque identifiant de page, le refus de 151 pages, un intervalle de trois pages avec contrôle de numérotation, l’annulation d’une lecture lente et un scan de treize pages qui franchit le renouvellement du moteur. Les durées sont consignées dans les logs des tests, pour l’environnement de test uniquement. Ils ne constituent pas un benchmark sur les appareils des utilisateurs ni une validation de 150 pages scannées.

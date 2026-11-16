@@ -2,7 +2,8 @@ import { OPS } from 'pdfjs-dist';
 import { createWorker } from 'tesseract.js';
 import { translator, UserError } from './i18n.js';
 import { Document, Packer, Paragraph, TextRun, SectionType, PageOrientation } from 'docx';
-import { checkAbort } from './document-source.js';
+import { checkAbort } from './abort.js';
+import {pageSelection,textBudget} from './workload.js';
 import { ocrParagraphs } from './ocr-format.js';
 import { prepareScan, recognitionScore } from './scan-quality.js';
 import { validateWord } from './word-validation.js';
@@ -62,13 +63,16 @@ async function recognizeScan(worker,canvas,signal,quality) {
  if(Math.abs(data.rotateRadians||0)>=.005)adjustments.push('deskewAdjusted');
  return {data,adjustments};
 }
-export async function convertDocument(source,{signal,onProgress=()=>{},t=translator('fr')}={}) {
- const sections=[],reports=[],alerts=[];let worker,currentPage=0,ocrPages=0;
+export async function convertDocument(source,{signal,onProgress=()=>{},t=translator('fr'),firstPage=1,lastPage=source.numPages}={}) {
+ const selection=pageSelection(source.numPages,firstPage,lastPage);if(!selection)throw new UserError(t('errorRange'));
+ const budget=textBudget(t);
+ const sections=[],reports=[],alerts=[];let worker,currentPage=firstPage,ocrPages=0,workerPages=0;
+ const notify=(phase,fraction=0,percent=null)=>onProgress({page:currentPage,total:source.numPages,completed:reports.length,selectedTotal:selection.count,scanPages:ocrPages,progress:percent??Math.min(92,((currentPage-firstPage+fraction)/selection.count)*92),phase});
  const stop=()=>{if(worker)void worker.terminate();};signal?.addEventListener('abort',stop,{once:true});
  try {
-  for(let number=1;number<=source.numPages;number++) {
+  for(let number=firstPage;number<=lastPage;number++) {
    currentPage=number;checkAbort(signal);
-   onProgress({page:number,total:source.numPages,progress:(number-1)/source.numPages*92,phase:t('phaseConvert')});
+   notify(t('phaseConvert'));
    const page=await source.getPage(number);
    try {
     const view=dimensions(page,t),content=await page.getTextContent(),operators=await page.getOperatorList();
@@ -78,12 +82,12 @@ export async function convertDocument(source,{signal,onProgress=()=>{},t=transla
     if(page.getAnnotations && (await page.getAnnotations()).length)warnings.push('annotations');
     const native=content.items.some(item=>'str'in item&&item.str.trim())&&!images&&!content.items.some(item=>'str'in item&&/[\u0000-\u0008\uFFFD]/.test(item.str));
     let children,lines,quality=null;
-    if(native){const result=nativeText(content);children=result.children;lines=result.lines;}
+    if(native){budget.reserve(content.items.reduce((length,item)=>length+('str'in item?item.str.length:0),0));const result=nativeText(content);children=result.children;lines=result.lines;}
     else {
      if(!worker){
-      onProgress({page:number,total:source.numPages,progress:(number-1)/source.numPages*92,phase:t('phaseLoad')});
+      notify(t('phaseLoad'));
       worker=await createWorker('fra+eng+nld',1,{workerPath:resource('ocr/worker.min.js'),corePath:resource('ocr/'),langPath:resource('ocr/'),workerBlobURL:false,gzip:false,cacheMethod:'none',errorHandler:()=>{},logger:message=>{
-       if(message.status==='recognizing text')onProgress({page:number,total:source.numPages,progress:(number-1+message.progress*.75)/source.numPages*92,phase:t('phaseRead')});
+       if(message.status==='recognizing text')notify(t('phaseRead'),message.progress*.75);
       }});
       checkAbort(signal);await worker.setParameters({classify_enable_learning:'0',user_defined_dpi:'300'});
      }
@@ -93,10 +97,11 @@ export async function convertDocument(source,{signal,onProgress=()=>{},t=transla
       warnings.push(...quality.warnings,'scanLayout');adjustments.push(...preparation.adjustments);
       if(page.originalPixels&&Math.min(page.originalPixels.width,page.originalPixels.height)<800)warnings.push('resolution');
       const recognition=await recognizeScan(worker,prepared,signal,quality);adjustments.push(...recognition.adjustments);
+      budget.reserve((recognition.data.text||'').length);
       const result=ocrParagraphs(recognition.data,number,t);children=result.children;
       lines=(recognition.data.blocks||[]).flatMap(block=>(block.paragraphs||[]).flatMap(paragraph=>paragraph.lines||[])).map(line=>({words:(line.words||[]).filter(word=>word.text?.trim()).map(word=>({text:word.text,confidence:word.confidence}))}));
       if(result.alert)alerts.push(result.alert);
-      ocrPages++;
+      ocrPages++;workerPages++;
      } finally{if(prepared&&prepared!==original)prepared.width=prepared.height=0;original.width=original.height=0;}
     }
     const unique=[...new Set(warnings)];
@@ -104,16 +109,20 @@ export async function convertDocument(source,{signal,onProgress=()=>{},t=transla
     reports.push({page:number,kind:native?'text':'scan',lines,warnings:unique,adjustments:[...new Set(adjustments)],quality:quality?{mean:quality.mean,sharpness:quality.sharpness}:null});
     sections.push({properties:properties(view),children});
    } finally{page.cleanup();}
+   notify(t('phaseConvert'),1);
+   // Periodically release OCR working memory; keep source and review text in the tab.
+   if(worker&&workerPages>=12&&number<lastPage){await worker.terminate();worker=null;workerPages=0;}
+   if((number-firstPage+1)%8===0)await source.releaseWorkingData?.();
    await new Promise(resolve=>setTimeout(resolve,0));
   }
-  checkAbort(signal);onProgress({page:source.numPages,total:source.numPages,progress:95,phase:t('phaseWord')});
-  const doc=new Document({creator:'',lastModifiedBy:'',title:'',description:'',styles:{default:{document:{run:{font:'Arial',size:22},paragraph:{spacing:{after:0}}}}},sections});
-  const blob=await Packer.toBlob(doc);checkAbort(signal);
-  onProgress({page:source.numPages,total:source.numPages,progress:98,phase:t('phaseValidate')});
-  const validation=await validateWord(blob,reports,source.numPages,t);checkAbort(signal);
-  return {blob,reports,alerts,ocrPages,pages:source.numPages,validation};
+  checkAbort(signal);notify(t('phaseWord'),0,95);
+  let doc=new Document({creator:'',lastModifiedBy:'',title:'',description:'',styles:{default:{document:{run:{font:'Arial',size:22},paragraph:{spacing:{after:0}}}}},sections});
+  const blob=await Packer.toBlob(doc);doc=null;sections.length=0;checkAbort(signal);
+  notify(t('phaseValidate'),0,98);
+  const validation=await validateWord(blob,reports,selection.count,t,{signal,firstPage});checkAbort(signal);
+  return {blob,reports,alerts,ocrPages,pages:selection.count,firstPage,lastPage,totalSourcePages:source.numPages,validation};
  } catch(error){checkAbort(signal);throw new UserError(t('errorAtPage',{page:currentPage||1,message:error instanceof UserError?error.message:t('errorGeneric')}));}
- finally{signal?.removeEventListener('abort',stop);if(worker)await worker.terminate();}
+ finally{signal?.removeEventListener('abort',stop);if(worker)await worker.terminate();await source.releaseWorkingData?.();}
 }
 const ROOT=new URL(import.meta.env.BASE_URL,window.location.href);
 const resource=path=>new URL(path,ROOT).href;

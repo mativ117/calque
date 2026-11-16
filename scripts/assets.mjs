@@ -38,6 +38,7 @@ for (const [name, file] of [
   ['Tesseract.js', 'node_modules/tesseract.js/LICENSE.md'],
   ['Tesseract.js-core', 'node_modules/tesseract.js-core/LICENSE'],
   ['JSZip', 'node_modules/jszip/LICENSE.markdown'],
+  ['sax 1.6.1', 'node_modules/sax/LICENSE.md'],
   ['Modèles OCR', 'public/ocr/MODELS-LICENSE'],
 ]) notices.push(`${name}\n${'='.repeat(name.length)}\n${await readFile(file, 'utf8')}`);
 await writeFile('public/THIRD-PARTY.txt', notices.join('\n\n'));

@@ -13,7 +13,8 @@
     "pdfjs-dist": "5.4.394",
     "docx": "9.5.1",
     "tesseract.js": "6.0.1",
-    "jszip": "3.10.1"
+    "jszip": "3.10.1",
+    "sax": "1.6.1"
   },
   "devDependencies": {
     "vite": "7.2.2",

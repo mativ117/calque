@@ -14,8 +14,20 @@ function stream(data,extra='') {
  const bytes=Buffer.isBuffer(data)?data:Buffer.from(data);
  return Buffer.concat([Buffer.from(`<< /Length ${bytes.length} ${extra} >>\nstream\n`),bytes,Buffer.from('\nendstream')]);
 }
+function textPages(count){
+ const objects=['<< /Type /Catalog /Pages 2 0 R >>','<< /Type /Pages /Kids ['+Array.from({length:count},(_,i)=>(4+i*2)+' 0 R').join(' ')+'] /Count '+count+' >>','<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>'];
+ for(let i=0;i<count;i++)objects.push('<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 3 0 R >> >> /Contents '+(5+i*2)+' 0 R >>',stream('BT /F1 14 Tf 50 700 Td (Source page '+String(i+1).padStart(3,'0')+') Tj ET'));
+ return pdf(objects);
+}
+function scanPages(count,jpeg){
+ const objects=['<< /Type /Catalog /Pages 2 0 R >>','<< /Type /Pages /Kids ['+Array.from({length:count},(_,i)=>(4+i*2)+' 0 R').join(' ')+'] /Count '+count+' >>',stream(jpeg,'/Type /XObject /Subtype /Image /Width 1654 /Height 2339 /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode')];
+ for(let i=0;i<count;i++)objects.push('<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /XObject << /Im1 3 0 R >> >> /Contents '+(5+i*2)+' 0 R >>',stream('q 595 0 0 842 0 0 cm /Im1 Do Q'));
+ return pdf(objects);
+}
 export async function fixtures(browser) {
  await mkdir('tests/fixtures',{recursive:true});
+ await writeFile('tests/fixtures/long-150.pdf',textPages(150));
+ await writeFile('tests/fixtures/long-151.pdf',textPages(151));
  await writeFile('tests/fixtures/texte.pdf',pdf([
   '<< /Type /Catalog /Pages 2 0 R >>','<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>',
   '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 400] /Resources << /Font << /F1 5 0 R >> >> /Contents 6 0 R >>',
@@ -38,6 +50,7 @@ export async function fixtures(browser) {
    if(blank!==true){context.fillStyle='black';context.font='42px Arial';context.fillText('Bonjour document confidentiel 12345',120,240);if(blank==='multi'){context.fillText('Please review the confidential document.',120,340);context.fillText('De vergadering begint om negen uur.',120,440);}}
    return canvas.toDataURL('image/jpeg',.95).split(',')[1];
   },blank);
+  if(file==='scan.pdf')await writeFile('tests/fixtures/scan-long.pdf',scanPages(13,Buffer.from(data,'base64')));
   await writeFile(`tests/fixtures/${file}`,pdf([
    '<< /Type /Catalog /Pages 2 0 R >>','<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /XObject << /Im1 5 0 R >> >> /Contents 4 0 R >>',

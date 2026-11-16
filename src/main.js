@@ -1,15 +1,29 @@
 import './style.css';
 import { openDocument } from './document-source.js';
+import {checkAbort} from './abort.js';
+import {pageSelection} from './workload.js';
 import { convertDocument, renderPageCanvas } from './converter.js';
 import { resolveLanguage, translator, UserError } from './i18n.js';
 import { CONFIDENCE } from './ocr-format.js';
 const $=id=>document.getElementById(id);
-let file,pdf,controller,busy=false,resultUrl,selection=0,reports=null,currentPage=1,previewController,reviewVersion=0;
+let file,pdf,controller,busy=false,resultUrl,selection=0,reports=null,currentPage=1,previewController,reviewVersion=0,elapsedTimer;
 let language=resolveLanguage(window.location.search,navigator.languages),t=translator(language);
+function selectedRange(){return pdf?pageSelection(pdf.numPages,Number($('first-page').value),Number($('last-page').value)):null;}
 function updateFile(){
  $('file-title').textContent=file?file.name:t('dropTitle');
  $('file-meta').textContent=file?t('fileInfo',{size:new Intl.NumberFormat(language,{minimumFractionDigits:1,maximumFractionDigits:1}).format(file.size/1024/1024),count:pdf.numPages}):t('dropHint');
- $('selected-actions').hidden=!file;
+ $('selected-actions').hidden=!file;$('page-range').hidden=!pdf||pdf.numPages<2;
+ const large=!!file&&(pdf.numPages>=25||file.size>=10*1024*1024);$('workload-note').hidden=!large;
+ if(large)$('workload-note').textContent=t(pdf.numPages>=25?'longDocument':'largeFileNote');
+}
+function updateRange(){
+ const valid=selectedRange();$('range-error').hidden=!pdf||!!valid;$('convert').disabled=busy||!valid;
+ return valid;
+}
+function startElapsed(){
+ clearInterval(elapsedTimer);const start=performance.now();$('elapsed-status').hidden=false;
+ const update=()=>{const seconds=Math.floor((performance.now()-start)/1000);$('elapsed-status').textContent=t('elapsedTime',{minutes:Math.floor(seconds/60),seconds:String(seconds%60).padStart(2,'0')});};
+ update();elapsedTimer=setInterval(update,1000);
 }
 function applyLanguage(){
  document.documentElement.lang=language;document.title=t('title');document.querySelector('meta[name="description"]').content=t('meta');
@@ -27,8 +41,8 @@ function previewButtons(){
 }
 function recoveredText(){
  const text=$('text-preview'),warnings=$('review-warnings');text.replaceChildren();warnings.replaceChildren();
- const report=reports?.[currentPage-1];
- if(!report){text.textContent=t('reviewPending');return;}
+ const report=reports?.find(report=>report.page===currentPage);
+ if(!report){text.textContent=t(reports?'sourceNotConverted':'reviewPending');return;}
  if(!report.lines.some(line=>line.words.length))text.textContent=t('reviewEmpty');
  for(const line of report.lines){
   const paragraph=document.createElement('p');
@@ -56,24 +70,40 @@ async function showPage(number){
  finally{page?.cleanup();}
 }
 function resetResult(){
+ clearInterval(elapsedTimer);$('work-status').hidden=true;$('elapsed-status').hidden=true;$('selection-summary').hidden=true;
  if(resultUrl)URL.revokeObjectURL(resultUrl);resultUrl=null;reports=null;
  $('result').hidden=true;$('download').removeAttribute('href');$('alert-list').replaceChildren();$('error').hidden=true;recoveredText();
 }
 function setBusy(value){
- busy=value;for(const id of ['file','dropzone','replace','clear','language'])$(id).disabled=value;
- $('convert').disabled=value||!pdf;$('convert-label').textContent=t(value?'waiting':'create');$('cancel').hidden=!value;previewButtons();
+ busy=value;for(const id of ['file','dropzone','replace','clear','language','first-page','last-page'])$(id).disabled=value;
+ $('convert').disabled=value||!selectedRange();$('convert-label').textContent=t(value?'waiting':'create');$('cancel').hidden=!value;previewButtons();
 }
 async function choose(selected){
- if(!selected||busy)return;const version=++selection;resetResult();$('progress').hidden=true;controller?.abort();controller=new AbortController();
- previewController?.abort();++reviewVersion;clearCanvas();$('review').hidden=true;setBusy(true);$('cancel').hidden=true;
- const previous=pdf;pdf=null;file=null;if(previous)await previous.destroy();$('status').textContent=t('checking');
+ if(!selected||busy)return;const version=++selection;resetResult();controller?.abort();controller=new AbortController();
+ previewController?.abort();++reviewVersion;clearCanvas();$('review').hidden=true;setBusy(true);$('cancel').disabled=false;
+ $('progress').hidden=false;$('progress').removeAttribute('value');$('status').textContent=t('checking');
+ const previous=pdf;pdf=null;file=null;updateFile();
  try{
-  const loaded=await openDocument(selected,controller.signal,t);if(version!==selection){await loaded.destroy();return;}
-  pdf=loaded;file=selected;currentPage=1;updateFile();$('review-page').replaceChildren();
+  if(previous)await previous.destroy();checkAbort(controller.signal);
+  const loaded=await openDocument(selected,controller.signal,t,update=>{
+   if(version!==selection||controller.signal.aborted)return;
+   if(update.phase==='read'&&update.total){const percent=Math.round(update.loaded/update.total*100);$('progress').value=percent;$('status').textContent=t('loadingFile',{percent});}
+   else{$('progress').removeAttribute('value');$('status').textContent=t('parsingFile');}
+  });
+  if(version!==selection){await loaded.destroy();return;}
+  pdf=loaded;file=selected;currentPage=1;
+  $('first-page').value='1';$('last-page').value=String(pdf.numPages);for(const id of ['first-page','last-page'])$(id).max=String(pdf.numPages);
+  $('range-error').hidden=true;updateFile();$('review-page').replaceChildren();
   for(let page=1;page<=pdf.numPages;page++){const option=document.createElement('option');option.value=String(page);option.textContent=String(page);$('review-page').append(option);}
-  $('review').hidden=false;await showPage(1);$('status').textContent=t('ready');
- }catch(error){if(version!==selection)return;updateFile();$('error').textContent=error instanceof UserError?error.message:t('errorRead');$('error').hidden=false;$('status').textContent=t('chooseOther');}
- finally{if(version===selection)setBusy(false);}
+  $('review').hidden=false;$('status').textContent=t('preparingPreview');await showPage(1);checkAbort(controller.signal);$('status').textContent=t('ready');
+ }catch(error){
+  if(version!==selection)return;
+  if(error.name==='AbortError'){
+   const canceled=pdf;pdf=null;file=null;previewController?.abort();++reviewVersion;clearCanvas();$('review').hidden=true;if(canceled)await canceled.destroy();
+   $('status').textContent=t('openingCancelled');
+  }else{$('error').textContent=error instanceof UserError?error.message:t('errorRead');$('error').hidden=false;$('status').textContent=t('chooseOther');}
+  updateFile();
+ }finally{if(version===selection){$('progress').hidden=true;setBusy(false);}}
 }
 $('dropzone').addEventListener('click',()=>$('file').click());$('replace').addEventListener('click',()=>$('file').click());
 $('file').addEventListener('change',event=>{void choose(event.target.files[0]);event.target.value='';});
@@ -87,32 +117,38 @@ $('clear').addEventListener('click',async()=>{
 });
 $('language').addEventListener('change',()=>{
  if(busy)return;language=$('language').value;t=translator(language);const url=new URL(window.location.href);url.searchParams.set('lang',language);window.history.replaceState(null,'',url);
- applyLanguage();resetResult();$('progress').hidden=true;$('status').textContent=t(pdf?'ready':'initialStatus');if(pdf)void showPage(currentPage);
+ applyLanguage();resetResult();$('progress').hidden=true;updateRange();$('status').textContent=t(pdf?'ready':'initialStatus');if(pdf)void showPage(currentPage);
 });
 $('previous-page').addEventListener('click',()=>{if(!busy)void showPage(currentPage-1);});$('next-page').addEventListener('click',()=>{if(!busy)void showPage(currentPage+1);});$('review-page').addEventListener('change',()=>{if(!busy)void showPage(Number($('review-page').value));});
 for(const [id,angle]of[['rotate-left',270],['rotate-right',90]])$(id).addEventListener('click',()=>{
  if(busy||!pdf)return;pdf.rotate(currentPage,angle);resetResult();$('progress').hidden=true;$('status').textContent=t('rotated');void showPage(currentPage);
 });
-$('cancel').addEventListener('click',()=>{controller?.abort();$('cancel').disabled=true;$('status').textContent=t('cancelling');});
+for(const id of ['first-page','last-page'])$(id).addEventListener('input',()=>{
+ if(busy)return;resetResult();$('progress').hidden=true;const valid=updateRange();$('status').textContent=t(valid?'ready':'errorRange');
+});
+$('cancel').addEventListener('click',()=>{controller?.abort();previewController?.abort();$('cancel').disabled=true;$('status').textContent=t('cancelling');});
 $('convert').addEventListener('click',async()=>{
- if(busy||!pdf)return;resetResult();controller=new AbortController();setBusy(true);$('convert-label').textContent=t('converting');$('progress').hidden=false;$('progress').value=0;$('cancel').disabled=false;
+ if(busy||!pdf)return;const chosen=updateRange();if(!chosen)return;resetResult();previewController?.abort();++reviewVersion;controller=new AbortController();setBusy(true);startElapsed();$('convert-label').textContent=t('converting');$('progress').hidden=false;$('progress').value=0;$('cancel').disabled=false;
  try{
-  const result=await convertDocument(pdf,{signal:controller.signal,t,onProgress:update=>{$('progress').value=Math.max($('progress').value,update.progress);$('status').textContent=t('progress',update);}});
-  reports=result.reports;resultUrl=URL.createObjectURL(result.blob);$('download').href=resultUrl;$('download').download=file.name.replace(/\.[^.]+$/,'')+'-calque.docx';
-  $('result-summary').textContent=t('resultSummary',{count:result.pages});$('validation-status').textContent=t('validationOK',{count:result.validation.sourcePages});
+  const result=await convertDocument(pdf,{signal:controller.signal,t,firstPage:chosen.first,lastPage:chosen.last,onProgress:update=>{
+   $('progress').value=Math.max($('progress').value,update.progress);const status=t('progress',update);if($('status').textContent!==status)$('status').textContent=status;
+   $('work-status').hidden=false;$('work-status').textContent=t('workProgress',{done:update.completed,total:update.selectedTotal,scans:update.scanPages});
+  }});
+  reports=result.reports;resultUrl=URL.createObjectURL(result.blob);$('download').href=resultUrl;$('download').download=file.name.replace(/\.[^.]+$/,'')+'-calque'+(chosen.count<pdf.numPages?'-'+chosen.first+'-'+chosen.last:'')+'.docx';
+  $('result-summary').textContent=t('resultSummary',{count:result.pages});$('selection-summary').hidden=chosen.count===pdf.numPages;$('selection-summary').textContent=t('selectionResult',{first:chosen.first,last:chosen.last,total:pdf.numPages});$('validation-status').textContent=t('validationOK',{count:result.validation.sourcePages});
   const flagged=new Set(result.alerts.map(alert=>alert.page));for(const report of reports)if(report.warnings.length)flagged.add(report.page);
   $('alerts').hidden=!flagged.size;
   for(const number of [...flagged].sort((a,b)=>a-b)){
-   const report=reports[number-1],alert=result.alerts.find(item=>item.page===number),line=document.createElement('li'),link=document.createElement('a');
+   const report=reports.find(report=>report.page===number),alert=result.alerts.find(item=>item.page===number),line=document.createElement('li'),link=document.createElement('a');
    const descriptions=report.warnings.map(warning=>t('warning_'+warning));
    if(alert)descriptions.unshift(t(alert.kind==='empty'?'alertEmpty':'alertUncertain',{page:number,count:alert.uncertain}));
    link.href='#review';link.textContent=t('reviewCounter',{page:number,total:pdf.numPages});link.addEventListener('click',()=>{void showPage(number);});line.append(link,document.createTextNode(' — '+descriptions.join(' ')));$('alert-list').append(line);
   }
   $('result').hidden=false;$('progress').value=100;$('status').textContent=t(flagged.size?'completedAlerts':'completed',{count:flagged.size});
-  void showPage(currentPage);$('download').focus({preventScroll:true});$('result').scrollIntoView({behavior:window.matchMedia('(prefers-reduced-motion: reduce)').matches?'instant':'smooth',block:'nearest'});
+  void showPage(currentPage>=chosen.first&&currentPage<=chosen.last?currentPage:chosen.first);$('download').focus({preventScroll:true});$('result').scrollIntoView({behavior:window.matchMedia('(prefers-reduced-motion: reduce)').matches?'instant':'smooth',block:'nearest'});
  }catch(error){
   if(error.name==='AbortError')$('status').textContent=t('cancelled');else{$('error').textContent=error instanceof UserError?error.message:t('errorGeneric');$('error').hidden=false;$('status').textContent=t('failed');}$('progress').hidden=true;
- }finally{setBusy(false);}
+ }finally{clearInterval(elapsedTimer);setBusy(false);}
 });
-window.addEventListener('pagehide',()=>{controller?.abort();previewController?.abort();++reviewVersion;resetResult();clearCanvas();if(pdf)void pdf.destroy();});
+window.addEventListener('pagehide',()=>{++selection;clearInterval(elapsedTimer);controller?.abort();previewController?.abort();++reviewVersion;resetResult();clearCanvas();if(pdf)void pdf.destroy();});
 applyLanguage();$('status').textContent=t('initialStatus');previewButtons();

@@ -87,3 +87,49 @@ test('une page tournée peut être reconnue automatiquement et le réglage est s
  expect(xml).toContain('Bonjour');await expect(page.locator('#text-preview')).toContainText('Bonjour');
  await expect(page.locator('#review-warnings')).toContainText('orientation');
 });
+
+test('PDF de 150 pages texte : toutes les pages sont converties',async({page})=>{
+ const start=Date.now();await page.goto('./');await select(page,'long-150.pdf');await expect(page.locator('#workload-note')).toBeVisible();
+ const zip=await convert(page);const xml=await zip.file('word/document.xml').async('string');
+ expect((xml.match(/<w:sectPr\b/g)||[]).length).toBe(150);
+ for(let i=1;i<=150;i++)expect(xml).toContain('Source page '+String(i).padStart(3,'0'));
+ await expect(page.locator('#work-status')).toContainText('150 / 150');await expect(page.locator('#validation-status')).toContainText('150 page(s) source');
+ console.log(JSON.stringify({fixture:'150 text pages',elapsedMs:Date.now()-start}));
+});
+test('PDF de 151 pages refusé avec une explication, limites inchangées',async({page})=>{
+ await page.goto('./');await page.locator('#file').setInputFiles('tests/fixtures/long-151.pdf');await expect(page.locator('#error')).toContainText('dépasse 150 pages');await expect(page.locator('#convert')).toBeDisabled();await expect(page.locator('#review')).toBeHidden();
+});
+test('intervalle de pages : validation et aperçu conservent la numérotation source',async({page})=>{
+ await page.goto('./');await select(page,'long-150.pdf');await page.locator('#page-range').evaluate(element=>element.open=true);
+ await page.locator('#first-page').fill('50');await page.locator('#last-page').fill('52');
+ const zip=await convert(page);const xml=await zip.file('word/document.xml').async('string');
+ expect((xml.match(/<w:sectPr\b/g)||[]).length).toBe(3);for(const i of [50,51,52])expect(xml).toContain('Source page '+String(i).padStart(3,'0'));expect(xml).not.toContain('Source page 049');expect(xml).not.toContain('Source page 053');
+ await expect(page.locator('#selection-summary')).toContainText('50 à 52 sur 150');await expect(page.locator('#review-page')).toHaveValue('50');
+ await page.locator('#review-page').selectOption('49');await expect(page.locator('#text-preview')).toContainText('pas été incluse');
+ await page.locator('#first-page').fill('54');await expect(page.locator('#range-error')).toBeVisible();await expect(page.locator('#convert')).toBeDisabled();
+});
+test('ouverture annulable : la lecture du fichier ne se poursuit pas',async({page})=>{
+ await page.addInitScript(()=>{
+  const Reader=window.FileReader;
+  window.FileReader=class extends Reader{
+   readAsArrayBuffer(file){if(file.name==='slow.pdf'){this.pending=setTimeout(()=>super.readAsArrayBuffer(file),10000);}else super.readAsArrayBuffer(file);}
+   abort(){clearTimeout(this.pending);window.readerStopped=true;super.abort();}
+  };
+ });
+ await page.goto('./');await page.locator('#file').setInputFiles({name:'slow.pdf',mimeType:'application/pdf',buffer:Buffer.from('%PDF-1.4 slow')});
+ await expect(page.locator('#cancel')).toBeVisible();await page.locator('#cancel').click();await expect(page.locator('#status')).toContainText('Ouverture annulée');expect(await page.evaluate(()=>window.readerStopped)).toBe(true);
+ await expect(page.locator('#result')).toBeHidden();await expect(page.locator('#convert')).toBeDisabled();
+ await select(page,'texte.pdf');await convert(page);
+});
+test('scan de 13 pages : progression exacte et reprise après renouvellement du moteur',async({page})=>{
+ const start=Date.now();await page.goto('./');await select(page,'scan-long.pdf');
+ await page.evaluate(()=>{
+  window.readingStatuses=[];const status=document.getElementById('status');
+  window.statusObserver=new MutationObserver(()=>{if(status.textContent.includes('Lecture du texte'))window.readingStatuses.push(status.textContent);});window.statusObserver.observe(status,{childList:true,subtree:true});
+ });
+ const zip=await convert(page);const xml=await zip.file('word/document.xml').async('string');
+ expect((xml.match(/<w:sectPr\b/g)||[]).length).toBe(13);for(let i=1;i<=13;i++)expect(xml).toContain('Page d’origine '+i+' —');
+ expect((await page.evaluate(()=>window.readingStatuses)).some(status=>status.includes('page 13 sur 13'))).toBe(true);
+ await expect(page.locator('#work-status')).toContainText('13 / 13');
+ console.log(JSON.stringify({fixture:'13 scanned pages',elapsedMs:Date.now()-start}));
+});
