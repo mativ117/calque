@@ -1,13 +1,14 @@
+import {flowingContent} from './flow-layout.js';
 import { OPS } from 'pdfjs-dist';
 import { createWorker } from 'tesseract.js';
 import { translator, UserError } from './i18n.js';
-import { Document, Packer, Paragraph, TextRun, SectionType, PageOrientation,CommentRangeStart,CommentRangeEnd,CommentReference } from 'docx';
+import { Document, Packer, Paragraph, TextRun, SectionType, PageOrientation,Header,CommentRangeStart,CommentRangeEnd,CommentReference } from 'docx';
 import { checkAbort } from './abort.js';
 import {pageSelection,textBudget} from './workload.js';
 import { ocrParagraphs } from './ocr-format.js';
 import { prepareScan, recognitionScore } from './scan-quality.js';
 import { validateWord } from './word-validation.js';
-import {analyseOperators,nativeLayout,scanLayout,positionedParagraph,backgroundParagraph,pageAnchor} from './pdf-layout.js';
+import {analyseOperators,nativeLayout,scanLayout,backgroundParagraph,pageAnchor} from './pdf-layout.js';
 const MAX_PIXELS=12_000_000;
 const IMAGE_OPS=new Set(Object.entries(OPS).filter(([name])=>/paint.*Image/.test(name)).map(([,value])=>value));
 const GRAPHIC_OPS=new Set(Object.entries(OPS).filter(([name])=>/constructPath|shadingFill|paint.*Image/.test(name)).map(([,value])=>value));
@@ -29,18 +30,6 @@ export async function renderPageCanvas(page,{signal,dpi=96,maxPixels=MAX_PIXELS,
  try{await task.promise;checkAbort(signal);return canvas;}
  catch(error){canvas.width=canvas.height=0;checkAbort(signal);throw error;}
  finally{signal?.removeEventListener('abort',abort);}
-}
-function nativeText(content) {
- const children=[],lines=[];let words=[],previousY;
- const flush=()=>{if(words.length){lines.push({words:words.map(word=>({text:word.text}))});children.push(new Paragraph({spacing:{before:0,after:0},children:words.map(word=>new TextRun(word))}));}words=[];};
- for(const item of content.items){
-  if(!('str'in item)||!item.str.trim())continue;
-  const y=item.transform[5];if(previousY!==undefined&&Math.abs(y-previousY)>3)flush();
-  const style=content.styles[item.fontName]||{},font=(style.fontFamily||'Arial').replace(/["']/g,'');
-  words.push({text:item.str+' ',font,size:Math.round(Math.max(5,Math.min(144,Math.hypot(item.transform[2],item.transform[3]))))*2,bold:/bold/i.test(item.fontName+font),italics:/italic|oblique/i.test(item.fontName+font)});
-  previousY=y;if(item.hasEOL)flush();
- }
- flush();return {children,lines};
 }
 async function recognizeScan(worker,canvas,signal,quality) {
  const options={rotateAuto:true};
@@ -85,14 +74,15 @@ export async function convertDocument(source,{signal,onProgress=()=>{},t=transla
     if(page.getAnnotations && (await page.getAnnotations()).length)warnings.push('annotations');
     const visibleText=analysis.totalCharacters===0||analysis.visibleCharacters/analysis.totalCharacters>.8;
     const native=content.items.some(item=>'str'in item&&item.str.trim())&&visibleText&&(!images||imageCoverage<.6||analysis.visibleCharacters>=400)&&!content.items.some(item=>'str'in item&&/[\u0000-\u0008\uFFFD]/.test(item.str));
+    let pageBackground=null;
     let children,lines,quality=null,note='',positioned=true,layoutStats={columns:1},outputView=view;
     if(native){
      budget.reserve(content.items.reduce((length,item)=>length+('str'in item?item.str.length:0),0));
      const paintTextOps=new Set([OPS.showText,OPS.showSpacedText,OPS.nextLineShowText,OPS.nextLineSetSpacingShowText]);
      const result=nativeLayout(content,view,name=>page.getFontInfo?.(name)||{},analysis);layoutStats={columns:result.columns};
      if(result.lines.some(line=>Math.abs(line.angle)>1)){
-      // A rotated native line cannot yet be positioned with Word paragraph frames.
-      const plain=nativeText(content);children=plain.children;lines=plain.lines;positioned=false;warnings.push('rotatedLayout');
+      // Recover rotated text and its colours in reading order; warn about changed layout.
+      children=result.lines.map(line=>new Paragraph({children:line.runs.map(run=>new TextRun({text:run.text,font:line.font,size:Math.round(line.fontSize*2),bold:line.bold,italics:line.italics,color:run.color}))}));lines=result.lines.map(line=>({words:[{text:line.text}]}));positioned=false;warnings.push('rotatedLayout');
      }else{
       let background;
       if(hasGraphics){
@@ -100,7 +90,8 @@ export async function convertDocument(source,{signal,onProgress=()=>{},t=transla
        try{const png=await new Promise(resolve=>canvas.toBlob(resolve,'image/png'));if(!png)throw new UserError(t('errorImage'));background=new Uint8Array(await png.arrayBuffer());checkAbort(signal);}finally{canvas.width=canvas.height=0;}
        warnings.push('visualLayer');
       }
-      children=[background?backgroundParagraph(background,view):pageAnchor(),...result.lines.map(line=>positionedParagraph(line))];
+      pageBackground=background?backgroundParagraph(background,view):null;
+      children=[pageAnchor(),...flowingContent(result.lines,view)];
       lines=result.lines.map(line=>({words:[{text:line.text}]}));adjustments.push('positionedLayout');
      }
     }
@@ -122,7 +113,7 @@ export async function convertDocument(source,{signal,onProgress=()=>{},t=transla
       const result=ocrParagraphs(recognition.data,number,t);note=t('wordPrefix',{page:number})+result.note;
       if(recognition.width!==prepared.width)outputView={width:view.height,height:view.width};
       const layout=scanLayout(recognition.data,recognition.width,recognition.height,outputView);layoutStats={columns:layout.columns};
-      children=[pageAnchor(),...layout.lines.map(line=>positionedParagraph(line))];
+      children=[pageAnchor(),...flowingContent(layout.lines,outputView)];
       if(!layout.lines.length)children.push(new Paragraph({children:[new TextRun({text:t('wordEmpty'),size:22})]}));
       lines=(recognition.data.blocks||[]).flatMap(block=>(block.paragraphs||[]).flatMap(paragraph=>paragraph.lines||[])).map(line=>({words:(line.words||[]).filter(word=>word.text?.trim()).map(word=>({text:word.text,confidence:word.confidence}))}));
       if(result.alert)alerts.push(result.alert);
@@ -134,11 +125,11 @@ export async function convertDocument(source,{signal,onProgress=()=>{},t=transla
     if(notes.length){
      const id=comments.length;comments.push({id,author:'Calque',initials:'C',children:notes.map(text=>new Paragraph({children:[new TextRun(text)]}))});
      // Anchor to an existing line; keep diagnostics out of the document's visible flow.
-     const target=children.find((child,index)=>index>0)||children[0];
+     const target=children[0];
      target.addChildElement(new CommentRangeStart(id));target.addChildElement(new CommentRangeEnd(id));target.addChildElement(new TextRun({children:[new CommentReference(id)],size:2,vanish:true}));
     }
     reports.push({page:number,kind:native?'text':'scan',layout:layoutStats,lines,warnings:unique,adjustments:[...new Set(adjustments)],quality:quality?{mean:quality.mean,sharpness:quality.sharpness}:null});
-    sections.push({properties:properties(outputView,positioned),children});
+    sections.push({properties:properties(outputView,positioned),headers:{default:new Header({children:[pageBackground||pageAnchor()]})},children});
    } finally{page.cleanup();}
    notify(t('phaseConvert'),1);
    // Periodically release OCR working memory; keep source and review text in the tab.

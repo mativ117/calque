@@ -40,7 +40,7 @@ for(const file of ['document.png','document.jpg'])test('image de document accept
 });
 test('tableau non reconstruit : perte explicitement signalée dans le bilan et le Word',async({page})=>{
  await page.goto('./');await select(page,'tableau.pdf');const zip=await convert(page);
- const xml=await zip.file('word/document.xml').async('string');expect(xml).toContain('Facture test');expect(xml).toContain('<w:framePr');expect(xml).not.toContain('<w:tbl>');expect(await zip.file('word/comments.xml').async('string')).toContain('couche image');
+ const xml=await zip.file('word/document.xml').async('string');expect(xml).toContain('Facture test');expect(xml).not.toContain('<w:framePr');expect(await zip.file('word/comments.xml').async('string')).toContain('couche image');
  await expect(page.locator('#review-warnings')).toContainText('couche image');
 });
 test('page vide : aucun faux succès de lecture',async({page})=>{
@@ -138,7 +138,7 @@ test('CV fictif : colonnes, styles, photo et fonds sans texte aplati',async({pag
  await page.goto('./');await select(page,'cv-columns.pdf');const zip=await convert(page);
  const xml=await zip.file('word/document.xml').async('string');
  expect((xml.match(/<w:sectPr\b/g)||[]).length).toBe(2);
- expect((xml.match(/<w:framePr\b/g)||[]).length).toBeGreaterThan(20);
+ expect(xml).not.toContain('<w:framePr');expect(xml).not.toContain('w:txbxContent');expect(xml).toContain('<w:tbl>');
  for(const value of ['ALIX EXAMPLE','contact@example.test','FFFFFF','C97840','Arial','<w:b/>'])expect(xml).toContain(value);
  expect(xml.indexOf('Independent left column')).toBeLessThan(xml.indexOf('CONTACT'));
  expect(xml).not.toContain('Page d’origine');expect(xml).not.toContain('couche image');

@@ -1,4 +1,4 @@
-import {Paragraph,TextRun,ImageRun,CommentRangeStart,CommentRangeEnd,CommentReference} from 'docx';
+import {Paragraph,TextRun,ImageRun} from 'docx';
 const IDENTITY=[1,0,0,1,0,0];
 function multiply(a,b){return [a[0]*b[0]+a[2]*b[1],a[1]*b[0]+a[3]*b[1],a[0]*b[2]+a[2]*b[3],a[1]*b[2]+a[3]*b[3],a[0]*b[4]+a[2]*b[5]+a[4],a[1]*b[4]+a[3]*b[5]+a[5]];}
 const normal=text=>String(text).normalize('NFKC').replace(/[\s\u00ad\u200b]/gu,'');
@@ -8,19 +8,21 @@ function rgb(args){
  return values.slice(0,3).map(v=>Math.round(Math.max(0,Math.min(255,v<=1?v*255:v))).toString(16).padStart(2,'0')).join('').toUpperCase();
 }
 export function analyseOperators(operators,ops){
- const stack=[],paints=[],images=[];let state={color:'000000',transform:IDENTITY,mode:0},text='',visible=0;
+ const stack=[],paints=[],images=[];let state={color:'000000',stroke:'000000',transform:IDENTITY,mode:0},text='',visible=0;
  for(let index=0;index<operators.fnArray.length;index++){
   const op=operators.fnArray[index],args=operators.argsArray[index]||[];
   if(op===ops.save)stack.push({...state,transform:[...state.transform]});
   else if(op===ops.restore)state=stack.pop()||state;
   else if(op===ops.transform)state.transform=multiply(state.transform,args);
   else if(op===ops.setFillRGBColor)state.color=rgb(args)||state.color;
+  else if(op===ops.setStrokeRGBColor)state.stroke=rgb(args)||state.stroke;
+  else if(op===ops.setFillCMYKColor){const [c,m,y,k]=args;state.color=rgb([255*(1-c)*(1-k),255*(1-m)*(1-k),255*(1-y)*(1-k)]);}
   else if(op===ops.setFillGray){const v=Math.round(Math.max(0,Math.min(1,args[0]))*255).toString(16).padStart(2,'0');state.color=(v+v+v).toUpperCase();}
   else if(op===ops.setTextRenderingMode)state.mode=args[0];
   else if(op===ops.showText||op===ops.showSpacedText||op===ops.nextLineShowText||op===ops.nextLineSetSpacingShowText){
    const glyphs=args.find(value=>Array.isArray(value))||[];
    const value=normal(glyphs.map(glyph=>typeof glyph==='object'?(glyph.unicode||''):'').join(''));
-   if(value){const hidden=(state.mode&3)===3;paints.push({start:text.length,end:text.length+value.length,color:state.color,hidden});text+=value;if(!hidden)visible+=value.length;}
+   if(value){const hidden=(state.mode&3)===3;paints.push({start:text.length,end:text.length+value.length,color:(state.mode&3)===1?state.stroke:state.color,hidden});text+=value;if(!hidden)visible+=value.length;}
   }
   if([ops.paintImageXObject,ops.paintInlineImageXObject,ops.paintImageMaskXObject].includes(op)){
    const m=state.transform;images.push({area:Math.abs(m[0]*m[3]-m[1]*m[2])});
@@ -86,19 +88,10 @@ export function nativeLayout(content,viewport,fontInfo,operatorAnalysis){
  }
  return orderLines(lines,viewport);
 }
-export function positionedParagraph(line,commentId){
- const size=Math.max(1,Math.round(line.fontSize*2)/2);
- const width=Math.max(size,line.width+size*.8);
- return new Paragraph({
-  frame:{type:'absolute',position:{x:Math.round(Math.max(0,line.x)*20),y:Math.round(Math.max(0,line.baseline-size*.975)*20)},width:Math.round(width*20),height:Math.round(size*1.4*20),anchor:{horizontal:'page',vertical:'page'},wrap:'none',space:{horizontal:0,vertical:0},rule:'atLeast'},
-  spacing:{before:0,after:0,line:Math.round(size*1.2*20),lineRule:'exact'},snapToGrid:false,
-  children:[...(commentId!==undefined?[new CommentRangeStart(commentId)]:[]),...line.runs.map(run=>new TextRun({text:run.text,font:line.font,size:size*2,bold:line.bold,italics:line.italics,color:run.color||'000000',scale:Math.max(50,Math.min(200,Math.round(line.fontSize/size*100))),...(run.uncertain?{highlight:'yellow'}:{})})),...(commentId!==undefined?[new CommentRangeEnd(commentId),new TextRun({children:[new CommentReference(commentId)],size:2})]:[])],
- });
-}
 export function backgroundParagraph(data,viewport){
- return new Paragraph({spacing:{before:0,after:0,line:20},children:[new ImageRun({type:'png',data,transformation:{width:viewport.width*96/72,height:viewport.height*96/72},floating:{horizontalPosition:{relative:'page',offset:0},verticalPosition:{relative:'page',offset:0},behindDocument:true,allowOverlap:true,layoutInCell:false}})]});
+ return new Paragraph({run:{size:2},spacing:{before:0,after:0,line:20,lineRule:'exact'},children:[new ImageRun({type:'png',data,transformation:{width:viewport.width*96/72,height:viewport.height*96/72},floating:{horizontalPosition:{relative:'page',offset:0},verticalPosition:{relative:'page',offset:0},behindDocument:true,allowOverlap:true,layoutInCell:false}})]});
 }
-export function pageAnchor(){return new Paragraph({spacing:{before:0,after:0,line:20},children:[new TextRun({text:'',size:2})]});}
+export function pageAnchor(){return new Paragraph({run:{size:2},spacing:{before:0,after:0,line:20,lineRule:'exact'},children:[new TextRun({text:'',size:2})]});}
 export function scanLayout(data,width,height,viewport){
  const lines=[];
  for(const block of data.blocks||[])for(const paragraph of block.paragraphs||[])for(const line of paragraph.lines||[]){
