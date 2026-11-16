@@ -43,6 +43,30 @@ export async function fixtures(browser) {
   stream('0 0 0 RG 1 w 50 600 450 140 re S 50 670 m 500 670 l S 275 600 m 275 740 l S BT /F1 14 Tf 65 705 Td (Article) Tj 230 0 Td (Montant) Tj -230 -70 Td (Facture test) Tj 230 0 Td (123 EUR) Tj ET'),
  ]));
  const page=await browser.newPage();
+ const avatar=Buffer.from(await page.evaluate(()=>{const c=document.createElement('canvas');c.width=c.height=16;const ctx=c.getContext('2d');ctx.fillStyle='#999';ctx.fillRect(0,0,16,16);return c.toDataURL('image/jpeg').split(',')[1];}),'base64');
+ const cvObjects=['<< /Type /Catalog /Pages 2 0 R >>','<< /Type /Pages /Kids [6 0 R 8 0 R] /Count 2 >>','<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>','<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>',stream(avatar,'/Type /XObject /Subtype /Image /Width 1 /Height 1 /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode')];
+ for(let index=0;index<2;index++){
+  const parts=[
+   '0.09 0.09 0.09 rg 397 0 198 842 re f',
+   '0.79 0.47 0.25 rg 394 0 3 842 re f',
+   '0.5 0.5 0.5 rg BT /F1 8 Tf 36 22 Td (SYNTHETIC CV) Tj ET',
+   '0.79 0.47 0.25 rg BT /F2 10 Tf 550 22 Td (0'+(index+1)+') Tj ET',
+   '0.1 0.1 0.1 rg BT /F2 24 Tf 36 790 Td (ALIX EXAMPLE) Tj ET',
+   '0.79 0.47 0.25 rg BT /F2 12 Tf 36 760 Td (BUSINESS ANALYST) Tj ET',
+   '0.1 0.1 0.1 rg BT /F2 12 Tf 36 690 Td (PROFILE) Tj ET',
+   '0.8 0.8 0.8 RG 0.5 w 36 682 m 372 682 l S',
+   '0.1 0.1 0.1 rg BT /F1 10 Tf 36 660 Td (Left profile first line.) Tj 0 -14 Td (Left profile second line.) Tj ET',
+   'BT /F2 12 Tf 36 600 Td (PROFESSIONAL EXPERIENCE) Tj ET',
+   'BT /F1 10 Tf 36 575 Td (Project delivery and analysis.) Tj 0 -14 Td (Independent left column text.) Tj ET',
+   '0.79 0.47 0.25 rg BT /F2 12 Tf 418 690 Td (CONTACT) Tj ET',
+   '1 1 1 rg BT /F1 10 Tf 418 660 Td (Example City) Tj 0 -14 Td (contact@example.test) Tj ET',
+   '0.79 0.47 0.25 rg BT /F2 12 Tf 418 600 Td (CORE SKILLS) Tj ET',
+   '1 1 1 rg BT /F1 10 Tf 418 575 Td (Requirements) Tj 0 -14 Td (Independent right text.) Tj ET',
+  ];
+  if(index===0)parts.push('q 90 0 0 90 439 720 cm /Photo Do Q');
+  cvObjects.push('<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> /XObject << /Photo 5 0 R >> >> /Contents '+(7+index*2)+' 0 R >>',stream(parts.join('\n')));
+ }
+ await writeFile('tests/fixtures/cv-columns.pdf',pdf(cvObjects));
  for(const [file,blank] of [['scan.pdf',false],['vide.pdf',true],['multilingue.pdf','multi']]) {
   const data=await page.evaluate(blank=>{
    const canvas=document.createElement('canvas');canvas.width=1654;canvas.height=2339;

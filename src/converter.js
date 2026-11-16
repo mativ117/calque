@@ -1,12 +1,13 @@
 import { OPS } from 'pdfjs-dist';
 import { createWorker } from 'tesseract.js';
 import { translator, UserError } from './i18n.js';
-import { Document, Packer, Paragraph, TextRun, SectionType, PageOrientation } from 'docx';
+import { Document, Packer, Paragraph, TextRun, SectionType, PageOrientation,CommentRangeStart,CommentRangeEnd,CommentReference } from 'docx';
 import { checkAbort } from './abort.js';
 import {pageSelection,textBudget} from './workload.js';
 import { ocrParagraphs } from './ocr-format.js';
 import { prepareScan, recognitionScore } from './scan-quality.js';
 import { validateWord } from './word-validation.js';
+import {analyseOperators,nativeLayout,scanLayout,positionedParagraph,backgroundParagraph,pageAnchor} from './pdf-layout.js';
 const MAX_PIXELS=12_000_000;
 const IMAGE_OPS=new Set(Object.entries(OPS).filter(([name])=>/paint.*Image/.test(name)).map(([,value])=>value));
 const GRAPHIC_OPS=new Set(Object.entries(OPS).filter(([name])=>/constructPath|shadingFill|paint.*Image/.test(name)).map(([,value])=>value));
@@ -15,15 +16,15 @@ function dimensions(page,t) {
  if(Math.min(view.width,view.height)<72||Math.max(view.width,view.height)>1584)throw new UserError(t('errorDimensions'));
  return view;
 }
-function properties(view) {
+function properties(view,positioned=false) {
  const landscape=view.width>view.height;
- return {type:SectionType.NEXT_PAGE,page:{size:{width:Math.round((landscape?view.height:view.width)*20),height:Math.round((landscape?view.width:view.height)*20),orientation:landscape?PageOrientation.LANDSCAPE:PageOrientation.PORTRAIT},margin:{top:480,bottom:480,left:480,right:480,header:0,footer:0}}};
+ return {type:SectionType.NEXT_PAGE,page:{size:{width:Math.round((landscape?view.height:view.width)*20),height:Math.round((landscape?view.width:view.height)*20),orientation:landscape?PageOrientation.LANDSCAPE:PageOrientation.PORTRAIT},margin:{top:positioned?0:480,bottom:positioned?0:480,left:positioned?0:480,right:positioned?0:480,header:0,footer:0}}};
 }
-export async function renderPageCanvas(page,{signal,dpi=96,maxPixels=MAX_PIXELS}={}) {
+export async function renderPageCanvas(page,{signal,dpi=96,maxPixels=MAX_PIXELS,operationsFilter}={}) {
  const view=page.getViewport({scale:1});const scale=Math.min(dpi/72,Math.sqrt(maxPixels/(view.width*view.height)));
  const canvas=document.createElement('canvas'),viewport=page.getViewport({scale});
  canvas.width=Math.ceil(viewport.width);canvas.height=Math.ceil(viewport.height);
- const task=page.render({canvasContext:canvas.getContext('2d'),viewport,background:'rgb(255,255,255)'});
+ const task=page.render({canvasContext:canvas.getContext('2d'),viewport,background:'rgb(255,255,255)',operationsFilter});
  const abort=()=>task.cancel();signal?.addEventListener('abort',abort,{once:true});
  try{await task.promise;checkAbort(signal);return canvas;}
  catch(error){canvas.width=canvas.height=0;checkAbort(signal);throw error;}
@@ -61,12 +62,12 @@ async function recognizeScan(worker,canvas,signal,quality) {
  const adjustments=[];
  if(rotation)adjustments.push('orientationAdjusted');
  if(Math.abs(data.rotateRadians||0)>=.005)adjustments.push('deskewAdjusted');
- return {data,adjustments};
+ return {data,adjustments,width:rotation%180?canvas.height:canvas.width,height:rotation%180?canvas.width:canvas.height};
 }
 export async function convertDocument(source,{signal,onProgress=()=>{},t=translator('fr'),firstPage=1,lastPage=source.numPages}={}) {
  const selection=pageSelection(source.numPages,firstPage,lastPage);if(!selection)throw new UserError(t('errorRange'));
  const budget=textBudget(t);
- const sections=[],reports=[],alerts=[];let worker,currentPage=firstPage,ocrPages=0,workerPages=0;
+ const sections=[],reports=[],alerts=[],comments=[];let worker,currentPage=firstPage,ocrPages=0,workerPages=0;
  const notify=(phase,fraction=0,percent=null)=>onProgress({page:currentPage,total:source.numPages,completed:reports.length,selectedTotal:selection.count,scanPages:ocrPages,progress:percent??Math.min(92,((currentPage-firstPage+fraction)/selection.count)*92),phase});
  const stop=()=>{if(worker)void worker.terminate();};signal?.addEventListener('abort',stop,{once:true});
  try {
@@ -78,11 +79,31 @@ export async function convertDocument(source,{signal,onProgress=()=>{},t=transla
     const view=dimensions(page,t),content=await page.getTextContent(),operators=await page.getOperatorList();
     const images=operators.fnArray.some(op=>IMAGE_OPS.has(op));
     const warnings=[],adjustments=[];
-    if(operators.fnArray.some(op=>GRAPHIC_OPS.has(op)))warnings.push('elements');
+    const analysis=analyseOperators(operators,OPS);
+    const imageCoverage=Math.max(0,...analysis.images.map(image=>image.area/(view.width*view.height)));
+    const hasGraphics=operators.fnArray.some(op=>GRAPHIC_OPS.has(op));
     if(page.getAnnotations && (await page.getAnnotations()).length)warnings.push('annotations');
-    const native=content.items.some(item=>'str'in item&&item.str.trim())&&!images&&!content.items.some(item=>'str'in item&&/[\u0000-\u0008\uFFFD]/.test(item.str));
-    let children,lines,quality=null;
-    if(native){budget.reserve(content.items.reduce((length,item)=>length+('str'in item?item.str.length:0),0));const result=nativeText(content);children=result.children;lines=result.lines;}
+    const visibleText=analysis.totalCharacters===0||analysis.visibleCharacters/analysis.totalCharacters>.8;
+    const native=content.items.some(item=>'str'in item&&item.str.trim())&&visibleText&&(!images||imageCoverage<.6||analysis.visibleCharacters>=400)&&!content.items.some(item=>'str'in item&&/[\u0000-\u0008\uFFFD]/.test(item.str));
+    let children,lines,quality=null,note='',positioned=true,layoutStats={columns:1},outputView=view;
+    if(native){
+     budget.reserve(content.items.reduce((length,item)=>length+('str'in item?item.str.length:0),0));
+     const paintTextOps=new Set([OPS.showText,OPS.showSpacedText,OPS.nextLineShowText,OPS.nextLineSetSpacingShowText]);
+     const result=nativeLayout(content,view,name=>page.getFontInfo?.(name)||{},analysis);layoutStats={columns:result.columns};
+     if(result.lines.some(line=>Math.abs(line.angle)>1)){
+      // A rotated native line cannot yet be positioned with Word paragraph frames.
+      const plain=nativeText(content);children=plain.children;lines=plain.lines;positioned=false;warnings.push('rotatedLayout');
+     }else{
+      let background;
+      if(hasGraphics){
+       const canvas=await renderPageCanvas(page,{signal,dpi:216,operationsFilter:index=>!paintTextOps.has(operators.fnArray[index])});
+       try{const png=await new Promise(resolve=>canvas.toBlob(resolve,'image/png'));if(!png)throw new UserError(t('errorImage'));background=new Uint8Array(await png.arrayBuffer());checkAbort(signal);}finally{canvas.width=canvas.height=0;}
+       warnings.push('visualLayer');
+      }
+      children=[background?backgroundParagraph(background,view):pageAnchor(),...result.lines.map(line=>positionedParagraph(line))];
+      lines=result.lines.map(line=>({words:[{text:line.text}]}));adjustments.push('positionedLayout');
+     }
+    }
     else {
      if(!worker){
       notify(t('phaseLoad'));
@@ -98,16 +119,26 @@ export async function convertDocument(source,{signal,onProgress=()=>{},t=transla
       if(page.originalPixels&&Math.min(page.originalPixels.width,page.originalPixels.height)<800)warnings.push('resolution');
       const recognition=await recognizeScan(worker,prepared,signal,quality);adjustments.push(...recognition.adjustments);
       budget.reserve((recognition.data.text||'').length);
-      const result=ocrParagraphs(recognition.data,number,t);children=result.children;
+      const result=ocrParagraphs(recognition.data,number,t);note=t('wordPrefix',{page:number})+result.note;
+      if(recognition.width!==prepared.width)outputView={width:view.height,height:view.width};
+      const layout=scanLayout(recognition.data,recognition.width,recognition.height,outputView);layoutStats={columns:layout.columns};
+      children=[pageAnchor(),...layout.lines.map(line=>positionedParagraph(line))];
+      if(!layout.lines.length)children.push(new Paragraph({children:[new TextRun({text:t('wordEmpty'),size:22})]}));
       lines=(recognition.data.blocks||[]).flatMap(block=>(block.paragraphs||[]).flatMap(paragraph=>paragraph.lines||[])).map(line=>({words:(line.words||[]).filter(word=>word.text?.trim()).map(word=>({text:word.text,confidence:word.confidence}))}));
       if(result.alert)alerts.push(result.alert);
       ocrPages++;workerPages++;
      } finally{if(prepared&&prepared!==original)prepared.width=prepared.height=0;original.width=original.height=0;}
     }
     const unique=[...new Set(warnings)];
-    for(const warning of unique)children.push(new Paragraph({spacing:{before:100,after:60},children:[new TextRun({text:t('wordWarning',{page:number,message:t('warning_'+warning)}),size:18,color:'7C5423',highlight:'yellow'})]}));
-    reports.push({page:number,kind:native?'text':'scan',lines,warnings:unique,adjustments:[...new Set(adjustments)],quality:quality?{mean:quality.mean,sharpness:quality.sharpness}:null});
-    sections.push({properties:properties(view),children});
+    const notes=[note,...unique.map(warning=>t('wordWarning',{page:number,message:t('warning_'+warning)}))].filter(Boolean);
+    if(notes.length){
+     const id=comments.length;comments.push({id,author:'Calque',initials:'C',children:notes.map(text=>new Paragraph({children:[new TextRun(text)]}))});
+     // Anchor to an existing line; keep diagnostics out of the document's visible flow.
+     const target=children.find((child,index)=>index>0)||children[0];
+     target.addChildElement(new CommentRangeStart(id));target.addChildElement(new CommentRangeEnd(id));target.addChildElement(new TextRun({children:[new CommentReference(id)],size:2,vanish:true}));
+    }
+    reports.push({page:number,kind:native?'text':'scan',layout:layoutStats,lines,warnings:unique,adjustments:[...new Set(adjustments)],quality:quality?{mean:quality.mean,sharpness:quality.sharpness}:null});
+    sections.push({properties:properties(outputView,positioned),children});
    } finally{page.cleanup();}
    notify(t('phaseConvert'),1);
    // Periodically release OCR working memory; keep source and review text in the tab.
@@ -116,7 +147,7 @@ export async function convertDocument(source,{signal,onProgress=()=>{},t=transla
    await new Promise(resolve=>setTimeout(resolve,0));
   }
   checkAbort(signal);notify(t('phaseWord'),0,95);
-  let doc=new Document({creator:'',lastModifiedBy:'',title:'',description:'',styles:{default:{document:{run:{font:'Arial',size:22},paragraph:{spacing:{after:0}}}}},sections});
+  let doc=new Document({creator:'',lastModifiedBy:'',title:'',description:'',comments:{children:comments},styles:{default:{document:{run:{font:'Arial',size:22},paragraph:{spacing:{after:0}}}}},sections});
   const blob=await Packer.toBlob(doc);doc=null;sections.length=0;checkAbort(signal);
   notify(t('phaseValidate'),0,98);
   const validation=await validateWord(blob,reports,selection.count,t,{signal,firstPage});checkAbort(signal);

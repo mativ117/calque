@@ -29,19 +29,19 @@ test('toutes les pages sources sont incluses, texte éditable et ZIP sans lien e
 test('lecture réelle d’un scan : réseau local en lecture, aucun stockage documentaire',async({page})=>{
  const external=[],writes=[],errors=[];page.on('request',r=>{if(!r.url().startsWith('http://127.0.0.1:4173/')&&!r.url().startsWith('blob:')&&!r.url().startsWith('data:'))external.push(r.url());if(!['GET','HEAD'].includes(r.method()))writes.push(r.url());});page.on('pageerror',e=>errors.push(e.message));
  await page.goto('./');await select(page,'scan.pdf');const zip=await convert(page);const xml=await zip.file('word/document.xml').async('string');
- expect(xml).toContain('Bonjour');expect(xml).toContain('confidentiel');expect(xml).toContain('Page d’origine 1');
+ expect(xml).toContain('Bonjour');expect(xml).toContain('confidentiel');expect(xml).not.toContain('Page d’origine 1');expect(await zip.file('word/comments.xml').async('string')).toContain('Page d’origine 1');
  await expect(page.locator('#text-preview')).toContainText('Bonjour');
  expect(external).toEqual([]);expect(writes).toEqual([]);expect(errors).toEqual([]);
  expect(await page.evaluate(async()=>({local:localStorage.length,session:sessionStorage.length,db:(await indexedDB.databases()).length}))).toEqual({local:0,session:0,db:0});
 });
 for(const file of ['document.png','document.jpg'])test('image de document acceptée : '+file,async({page})=>{
  await page.goto('./');await select(page,file);const zip=await convert(page);
- expect(await zip.file('word/document.xml').async('string')).toContain('Bonjour');await expect(page.locator('#review')).toBeVisible();await expect(page.locator('#alert-list')).toContainText('ne sont pas reconstruits');
+ expect(await zip.file('word/document.xml').async('string')).toContain('Bonjour');await expect(page.locator('#review')).toBeVisible();await expect(page.locator('#alert-list')).toContainText('ne sont pas reconstruites');
 });
 test('tableau non reconstruit : perte explicitement signalée dans le bilan et le Word',async({page})=>{
  await page.goto('./');await select(page,'tableau.pdf');const zip=await convert(page);
- const xml=await zip.file('word/document.xml').async('string');expect(xml).toContain('Facture test');expect(xml).toContain('ne sont pas reconstruits');
- await expect(page.locator('#review-warnings')).toContainText('dessins, des lignes ou des images');
+ const xml=await zip.file('word/document.xml').async('string');expect(xml).toContain('Facture test');expect(xml).toContain('<w:framePr');expect(xml).not.toContain('<w:tbl>');expect(await zip.file('word/comments.xml').async('string')).toContain('couche image');
+ await expect(page.locator('#review-warnings')).toContainText('couche image');
 });
 test('page vide : aucun faux succès de lecture',async({page})=>{
  await page.goto('./');await select(page,'vide.pdf');const zip=await convert(page);
@@ -71,11 +71,11 @@ for(const [language,title,error]of[['fr','Un fichier. Un Word modifiable.','Form
 });
 test('changer de langue conserve la source et traduit l’aperçu et le Word',async({page})=>{
  await page.goto('./?lang=fr');await select(page,'document.png');await page.locator('#language').selectOption('nl');await expect(page.locator('#file-title')).toHaveText('document.png');
- const zip=await convert(page);expect(await zip.file('word/document.xml').async('string')).toContain('Oorspronkelijke pagina 1');await expect(page.locator('#result-title')).toHaveText('Uw Word-document is klaar.');
+ const zip=await convert(page);expect(await zip.file('word/comments.xml').async('string')).toContain('Oorspronkelijke pagina 1');await expect(page.locator('#result-title')).toHaveText('Uw Word-document is klaar.');
 });
 test('scan multilingue : contenu non traduit et notes en anglais',async({page})=>{
  await page.goto('./?lang=en');await select(page,'multilingue.pdf');const zip=await convert(page);const xml=await zip.file('word/document.xml').async('string');
- for(const word of ['Bonjour','Please','vergadering','negen','Original page 1'])expect(xml).toContain(word);
+ for(const word of ['Bonjour','Please','vergadering','negen'])expect(xml).toContain(word);
 });
 
 test('image démesurée refusée avant décodage',async({page})=>{
@@ -128,8 +128,30 @@ test('scan de 13 pages : progression exacte et reprise après renouvellement du 
   window.statusObserver=new MutationObserver(()=>{if(status.textContent.includes('Lecture du texte'))window.readingStatuses.push(status.textContent);});window.statusObserver.observe(status,{childList:true,subtree:true});
  });
  const zip=await convert(page);const xml=await zip.file('word/document.xml').async('string');
- expect((xml.match(/<w:sectPr\b/g)||[]).length).toBe(13);for(let i=1;i<=13;i++)expect(xml).toContain('Page d’origine '+i+' —');
+ expect((xml.match(/<w:sectPr\b/g)||[]).length).toBe(13);const comments=await zip.file('word/comments.xml').async('string');for(let i=1;i<=13;i++)expect(comments).toContain('Page d’origine '+i+' —');
  expect((await page.evaluate(()=>window.readingStatuses)).some(status=>status.includes('page 13 sur 13'))).toBe(true);
  await expect(page.locator('#work-status')).toContainText('13 / 13');
  console.log(JSON.stringify({fixture:'13 scanned pages',elapsedMs:Date.now()-start}));
+});
+
+test('CV fictif : colonnes, styles, photo et fonds sans texte aplati',async({page})=>{
+ await page.goto('./');await select(page,'cv-columns.pdf');const zip=await convert(page);
+ const xml=await zip.file('word/document.xml').async('string');
+ expect((xml.match(/<w:sectPr\b/g)||[]).length).toBe(2);
+ expect((xml.match(/<w:framePr\b/g)||[]).length).toBeGreaterThan(20);
+ for(const value of ['ALIX EXAMPLE','contact@example.test','FFFFFF','C97840','Arial','<w:b/>'])expect(xml).toContain(value);
+ expect(xml.indexOf('Independent left column')).toBeLessThan(xml.indexOf('CONTACT'));
+ expect(xml).not.toContain('Page d’origine');expect(xml).not.toContain('couche image');
+ expect(await zip.file('word/comments.xml').async('string')).toContain('couche image');
+ const pngs=Object.keys(zip.files).filter(name=>name.startsWith('word/media/')&&name.endsWith('.png'));
+ expect(pngs).toHaveLength(2);
+ for(const name of pngs){
+  const pixels=await page.evaluate(async base64=>{
+   const img=new Image();img.src='data:image/png;base64,'+base64;await img.decode();
+   const c=document.createElement('canvas');c.width=img.width;c.height=img.height;const ctx=c.getContext('2d');ctx.drawImage(img,0,0);
+   const inspect=(x,y,w,h,light)=>{const sx=img.width/595,sy=img.height/842;const d=ctx.getImageData(Math.ceil(x*sx),Math.ceil(y*sy),Math.floor(w*sx),Math.floor(h*sy)).data;let bad=0;for(let i=0;i<d.length;i+=4)if(light?d[i]<245:d[i]>40)bad++;return bad;};
+   return {title:inspect(36,32,230,24,true),sidebar:inspect(418,173,160,28,false)};
+  },await zip.file(name).async('base64'));
+  expect(pixels).toEqual({title:0,sidebar:0});
+ }
 });

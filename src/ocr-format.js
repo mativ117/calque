@@ -21,5 +21,5 @@ export function ocrParagraphs(data, pageNumber, t = translator('fr')) {
       ...(!Number.isFinite(word.confidence) || word.confidence < CONFIDENCE ? { highlight: 'yellow' } : {}),
     })) }));
   }
-  return { children, alert: empty || uncertain ? { page: pageNumber, kind: empty ? 'empty' : 'uncertain', uncertain, total: words.length } : null };
+  return { children, note, alert: empty || uncertain ? { page: pageNumber, kind: empty ? 'empty' : 'uncertain', uncertain, total: words.length } : null };
 }

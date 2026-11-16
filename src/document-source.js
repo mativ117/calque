@@ -65,6 +65,7 @@ function wrapPdf(pdf) {
    const page=await pdf.getPage(n);
    return { getViewport:options=>page.getViewport({...options,rotation:(page.rotate+(rotations.get(n)||0))%360}),
     render:options=>page.render(options),getTextContent:()=>page.getTextContent(),getOperatorList:()=>page.getOperatorList(),getAnnotations:()=>page.getAnnotations(),
+    getFontInfo(name){if(!page.commonObjs.has(name))return {};const font=page.commonObjs.get(name);return {name:font.name,bold:font.bold,italic:font.italic};},
     cleanup:()=>page.cleanup(), originalPixels:null };
   },async releaseWorkingData(){try{await pdf.cleanup();return true;}catch{return false;}},destroy:()=>pdf.destroy(),
  };
