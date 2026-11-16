@@ -63,10 +63,22 @@ export async function fixtures(browser) {
    '0.79 0.47 0.25 rg BT /F2 12 Tf 418 600 Td (CORE SKILLS) Tj ET',
    '1 1 1 rg BT /F1 10 Tf 418 575 Td (Requirements) Tj 0 -14 Td (Independent right text.) Tj ET',
   ];
-  if(index===0)parts.push('q 90 0 0 90 439 720 cm /Photo Do Q');
+  if(index===0)parts.push('q 529 765 m 529 789.853 508.853 810 484 810 c 459.147 810 439 789.853 439 765 c 439 740.147 459.147 720 484 720 c 508.853 720 529 740.147 529 765 c W n 90 0 0 90 439 720 cm /Photo Do Q');
   cvObjects.push('<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> /XObject << /Photo 5 0 R >> >> /Contents '+(7+index*2)+' 0 R >>',stream(parts.join('\n')));
  }
  await writeFile('tests/fixtures/cv-columns.pdf',pdf(cvObjects));
+ await writeFile('tests/fixtures/overlay.pdf',pdf([
+  '<< /Type /Catalog /Pages 2 0 R >>','<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+  '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 4 0 R >> /XObject << /Photo 5 0 R >> /ExtGState << /G1 << /ca 0.4 >> >> >> /Contents 6 0 R >>',
+  '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',stream(avatar,'/Type /XObject /Subtype /Image /Width 16 /Height 16 /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode'),
+  stream('q 90 0 0 90 439 720 cm /Photo Do Q q /G1 gs 0 0.2 0.8 rg 397 0 198 842 re f Q 0 0 0 rg BT /F1 14 Tf 36 760 Td (Editable overlay test) Tj ET')
+ ]));
+ await writeFile('tests/fixtures/diagram.pdf',pdf([
+  '<< /Type /Catalog /Pages 2 0 R >>','<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+  '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>','<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+  stream('0 0 0 rg BT /F1 18 Tf 60 760 Td (Diagram test) Tj ET 0.1 0.3 0.7 rg 60 600 120 60 re f 0.8 0.4 0.1 rg 250 600 120 60 re f 0 0 0 RG 3 w 180 630 m 250 630 l S 1 1 1 rg BT /F1 12 Tf 80 625 Td (Source) Tj ET BT /F1 12 Tf 270 625 Td (Target) Tj ET 0 0 0 rg BT /F1 12 Tf 60 500 Td (Editable paragraph outside diagram.) Tj ET')
+ ]));
+
  for(const [file,blank] of [['scan.pdf',false],['vide.pdf',true],['multilingue.pdf','multi']]) {
   const data=await page.evaluate(blank=>{
    const canvas=document.createElement('canvas');canvas.width=1654;canvas.height=2339;
@@ -82,7 +94,7 @@ export async function fixtures(browser) {
    stream(Buffer.from(data,'base64'),'/Type /XObject /Subtype /Image /Width 1654 /Height 2339 /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode'),
   ]));
  }
- for(const [file,kind] of [['document.png','clear'],['document.jpg','clear'],['sombre.png','dark'],['tourne.png','rotated'],['faible.png','small'],['flou.png','blur']]) {
+ for(const [file,kind] of [['scan-picture.png','picture'],['document.png','clear'],['document.jpg','clear'],['sombre.png','dark'],['tourne.png','rotated'],['faible.png','small'],['flou.png','blur']]) {
   const data=await page.evaluate(kind=>{
    const c=document.createElement('canvas');c.width=kind==='small'?600:1654;c.height=kind==='small'?820:2339;
    const ctx=c.getContext('2d');ctx.fillStyle=kind==='dark'?'#333':'white';ctx.fillRect(0,0,c.width,c.height);
@@ -91,6 +103,7 @@ export async function fixtures(browser) {
    if(kind==='blur')ctx.filter='blur(5px)';
    ctx.fillText('Bonjour document confidentiel 12345',40,240);
    ctx.fillText('Please review the document.',40,330);
+   if(kind==='picture'){ctx.fillStyle='#2772b5';ctx.fillRect(980,700,380,420);ctx.fillStyle='#e99b35';ctx.beginPath();ctx.arc(1170,910,130,0,Math.PI*2);ctx.fill();}
    return c.toDataURL('image/png').split(',')[1];
   },kind);
   if(file.endsWith('.jpg')) {

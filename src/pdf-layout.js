@@ -22,7 +22,7 @@ export function analyseOperators(operators,ops){
   else if(op===ops.showText||op===ops.showSpacedText||op===ops.nextLineShowText||op===ops.nextLineSetSpacingShowText){
    const glyphs=args.find(value=>Array.isArray(value))||[];
    const value=normal(glyphs.map(glyph=>typeof glyph==='object'?(glyph.unicode||''):'').join(''));
-   if(value){const hidden=(state.mode&3)===3;paints.push({start:text.length,end:text.length+value.length,color:(state.mode&3)===1?state.stroke:state.color,hidden});text+=value;if(!hidden)visible+=value.length;}
+   if(value){const hidden=(state.mode&3)===3;paints.push({opIndex:index,start:text.length,end:text.length+value.length,color:(state.mode&3)===1?state.stroke:state.color,hidden});text+=value;if(!hidden)visible+=value.length;}
   }
   if([ops.paintImageXObject,ops.paintInlineImageXObject,ops.paintImageMaskXObject].includes(op)){
    const m=state.transform;images.push({area:Math.abs(m[0]*m[3]-m[1]*m[2])});
@@ -84,7 +84,8 @@ export function nativeLayout(content,viewport,fontInfo,operatorAnalysis){
    if(runs.length&&runs.at(-1).color===color)runs.at(-1).text+=letter;else runs.push({text:letter,color});
    character+=normal(letter).length;
   }
-  lines.push({x:m[4],baseline:m[5],width:Math.max(1,item.width),height:Math.max(1,item.height),fontSize:size,angle,text:item.str,runs,...style});
+  const paintIndices=offset<0?[]:operatorAnalysis.paints.filter(p=>p.start<offset+key.length&&p.end>offset).map(p=>p.opIndex).filter(Number.isInteger);
+  lines.push({paintIndices,x:m[4],baseline:m[5],width:Math.max(1,item.width),height:Math.max(1,item.height),fontSize:size,angle,text:item.str,runs,...style});
  }
  return orderLines(lines,viewport);
 }

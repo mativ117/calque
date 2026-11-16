@@ -14,18 +14,28 @@ Un seul fichier d’entrée, aucun choix de mode, aucune entrée Word. Le traite
 - Lecture des images avec orientation EXIF du navigateur ; commandes pour tourner chaque page avant conversion. Ajustement du contraste lorsque les niveaux s’y prêtent, correction de légère inclinaison par Tesseract et essais de quarts de tour si la première lecture est peu convaincante. Ces corrections ne sont ni systématiques ni garanties.
 - Alertes heuristiques pour page sombre, faible contraste, flou possible et petite image. Les seuils sont des indications, pas des mesures de fidélité certifiées.
 - Mots reconnus avec une confiance inférieure à 85/100 (ou sans score valide) surlignés en jaune. Page sans texte reconnue signalée explicitement.
-- Texte natif regroupé en paragraphes Word continus : tailles, couleurs et styles conservés par portion de texte. Les lignes enveloppées sont réunies ; les colonnes utilisent un tableau de mise en page sans bordures, sans cadres ni petites zones de texte. Les photos, fonds et traits restent dans une couche image séparée, sans texte aplati. Une petite photo ne déclenche plus la reconnaissance de toute la page. Le texte contenu uniquement dans une petite illustration peut manquer.
+- Texte natif regroupé en paragraphes Word continus : tailles, couleurs et styles conservés par portion de texte. Les lignes enveloppées sont réunies ; les colonnes utilisent un tableau de mise en page sans bordures, sans cadres ni petites zones de texte. Les photos et dessins isolables deviennent des objets image Word distincts, placés sur leur page, avec masques, recadrages et rotations intégrés dans les pixels. Les fonds et traits restants gardent une couche image séparée. Une petite photo ne déclenche plus la reconnaissance de toute la page. Le texte contenu uniquement dans une petite illustration peut manquer.
 - Alertes dans le bilan et les commentaires Word, sans ajout dans le contenu des pages. Annotations et champs signalés.
 - Comparaison page par page : **original rendu** à gauche, **texte récupéré** à droite, avec mots incertains surlignés. Ce panneau ne simule pas la mise en page de Microsoft Word. Une rotation après conversion invalide le résultat pour le recréer avec le réglage.
 - Vérification du ZIP/CRC, des fichiers Word requis, du XML et d’une section de sortie par page source avant d’offrir le téléchargement. Une erreur de structure empêche le téléchargement.
 
 ## Limites importantes
 
-Le texte est regroupé en paragraphes continus, dans un tableau sans bordures pour les pages à deux colonnes. La séparation des paragraphes est estimée à partir des styles, espacements et retraits du PDF ; elle peut demander une correction. Les polices peuvent être remplacées par des équivalents. Les ajouts font revenir le texte à la ligne et peuvent changer la pagination ; les fonds et traits restent fixes et peuvent nécessiter des ajustements. Les visuels sont une couche image, non modifiables individuellement ; les tableaux ne deviennent pas de vrais tableaux Word. Pour les scans, les paragraphes sont estimés, les couleurs du texte ne sont pas récupérées et restent noires et les illustrations ne sont pas reconstruites. Une fidélité parfaite à tout PDF n’est pas garantie.
+Le texte est regroupé en paragraphes continus, dans un tableau sans bordures pour les pages à deux colonnes. La séparation des paragraphes est estimée à partir des styles, espacements et retraits du PDF ; elle peut demander une correction. Les polices peuvent être remplacées par des équivalents. Les ajouts font revenir le texte à la ligne et peuvent changer la pagination ; les fonds et traits restent fixes et peuvent nécessiter des ajustements. Les visuels isolés sont sélectionnables, déplaçables et redimensionnables ; leurs formes et pixels internes ne sont pas reconstruits en objets natifs. Les schémas peuvent inclure leurs textes dans l’image pour préserver leur alignement. Les tableaux ne deviennent pas de vrais tableaux Word. Pour les scans, les paragraphes sont estimés, les couleurs du texte ne sont pas récupérées et restent noires ; les illustrations sont détectées par une heuristique conservatrice, avec des omissions ou des découpes imparfaites possibles. Une fidélité parfaite à tout PDF n’est pas garantie.
 
 Les photos de documents en PNG/JPEG sont acceptées, mais la correction de perspective, des reflets, des ombres locales et des pages courbées n’est pas implémentée. Photographier une page plane, bien cadrée et uniformément éclairée. HEIC, TIFF, SVG et Word ne sont pas acceptés. Les langues autres que français, anglais et néerlandais peuvent fonctionner pour le texte natif d’un PDF selon son encodage ; elles ne sont pas prises en charge pour la lecture d’images.
 
 La vérification de structure ne certifie ni la pagination réelle après ouverture dans Word, ni l’exhaustivité du contenu, ni l’apparence. L’aperçu original est produit par PDF.js : il n’est pas un contrôle indépendant de ce moteur. Les tests publics sont synthétiques, dont un CV fictif à deux colonnes avec photo et fonds. Une comparaison privée sur un CV réel a été effectuée via LibreOffice, sans publier le document ; une validation sous Microsoft Word reste nécessaire. Voir `tests/corpus/README.md`.
+
+## Visuels et contrôles de fidélité
+
+- Séparation locale des images et groupes de tracés PDF à partir des limites de rendu PDF.js. Le portrait peut conserver son contour circulaire transparent. Les tracés liés sont regroupés en images de schéma.
+- Rendu jusqu’à 300 ppp, limité à 12 millions de pixels par page de travail ; la résolution source ne peut pas être améliorée artificiellement. L’extraction privilégie l’apparence visible, sans récupérer les pixels cachés par un masque.
+- Comparaison de la recomposition des couches graphiques avec leur rendu de référence. Si les effets ou superpositions ne se séparent pas proprement, le groupe conserve une découpe de son décor et une alerte explique la limite. Ce contrôle utilise PDF.js des deux côtés et ne certifie pas le rendu Microsoft Word.
+- Au plus 16 groupes isolés par page PDF ; les très grands fonds, filets et groupes supplémentaires restent dans le fond. Les limites déclenchent une alerte lorsque détectées.
+- Pour les scans, détection conservatrice de régions graphiques après exclusion des mots reconnus, au plus 8 régions par page. Les illustrations sont découpées dans l’image d’origine. Après une correction automatique de légère inclinaison, l’extraction de visuels est omise pour éviter une découpe décalée. Les alertes de scan expliquent les omissions possibles.
+- Objets liés à leur page et placés derrière le texte pour éviter de le masquer. Word permet de les sélectionner, notamment via son volet de sélection. Les ajouts importants peuvent modifier la pagination ; vérifier le placement des objets et les fonds.
+- Avertissements contextuels dans le bilan et les commentaires Word, descriptions alternatives des images dans les trois langues. Aucun avertissement ajouté au contenu visible des pages.
 
 ## Confidentialité et sécurité
 
@@ -58,7 +68,7 @@ Les actions sont verrouillées par SHA. Permissions par job : lecture du dépôt
 
 Sélecteur français/English/Nederlands ; préférence initiale du navigateur, repli français. `?lang=fr`, `?lang=en`, `?lang=nl` choisissent explicitement, sans stockage local. Le changement de langue conserve la source mais libère un résultat existant pour recréer les notes dans la nouvelle langue. Changement désactivé pendant la conversion.
 
-Les chaînes sont dans `src/i18n.js` et `src/document-messages.js`. Les licences tierces gardent leur texte original.
+Les chaînes sont dans `src/i18n.js` et les modules `*-messages.js`, dont les explications des objets graphiques et leurs descriptions alternatives Word dans `src/visual-messages.js`. Les licences tierces gardent leur texte original.
 
 ## Tests
 

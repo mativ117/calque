@@ -1,3 +1,4 @@
+import {extractVisuals,extractScanVisuals,outsideVisuals,visualRun} from './visual-objects.js';
 import {flowingContent} from './flow-layout.js';
 import { OPS } from 'pdfjs-dist';
 import { createWorker } from 'tesseract.js';
@@ -21,11 +22,11 @@ function properties(view,positioned=false) {
  const landscape=view.width>view.height;
  return {type:SectionType.NEXT_PAGE,page:{size:{width:Math.round((landscape?view.height:view.width)*20),height:Math.round((landscape?view.width:view.height)*20),orientation:landscape?PageOrientation.LANDSCAPE:PageOrientation.PORTRAIT},margin:{top:positioned?0:480,bottom:positioned?0:480,left:positioned?0:480,right:positioned?0:480,header:0,footer:0}}};
 }
-export async function renderPageCanvas(page,{signal,dpi=96,maxPixels=MAX_PIXELS,operationsFilter}={}) {
+export async function renderPageCanvas(page,{signal,dpi=96,maxPixels=MAX_PIXELS,operationsFilter,transparent=false,recordOperations=false}={}) {
  const view=page.getViewport({scale:1});const scale=Math.min(dpi/72,Math.sqrt(maxPixels/(view.width*view.height)));
  const canvas=document.createElement('canvas'),viewport=page.getViewport({scale});
  canvas.width=Math.ceil(viewport.width);canvas.height=Math.ceil(viewport.height);
- const task=page.render({canvasContext:canvas.getContext('2d'),viewport,background:'rgb(255,255,255)',operationsFilter});
+ const task=page.render({canvasContext:canvas.getContext('2d'),viewport,background:transparent?'rgba(0,0,0,0)':'rgb(255,255,255)',operationsFilter,recordOperations});
  const abort=()=>task.cancel();signal?.addEventListener('abort',abort,{once:true});
  try{await task.promise;checkAbort(signal);return canvas;}
  catch(error){canvas.width=canvas.height=0;checkAbort(signal);throw error;}
@@ -51,7 +52,7 @@ async function recognizeScan(worker,canvas,signal,quality) {
  const adjustments=[];
  if(rotation)adjustments.push('orientationAdjusted');
  if(Math.abs(data.rotateRadians||0)>=.005)adjustments.push('deskewAdjusted');
- return {data,adjustments,width:rotation%180?canvas.height:canvas.width,height:rotation%180?canvas.width:canvas.height};
+ return {data,adjustments,rotation,width:rotation%180?canvas.height:canvas.width,height:rotation%180?canvas.width:canvas.height};
 }
 export async function convertDocument(source,{signal,onProgress=()=>{},t=translator('fr'),firstPage=1,lastPage=source.numPages}={}) {
  const selection=pageSelection(source.numPages,firstPage,lastPage);if(!selection)throw new UserError(t('errorRange'));
@@ -78,20 +79,24 @@ export async function convertDocument(source,{signal,onProgress=()=>{},t=transla
     let children,lines,quality=null,note='',positioned=true,layoutStats={columns:1},outputView=view;
     if(native){
      budget.reserve(content.items.reduce((length,item)=>length+('str'in item?item.str.length:0),0));
-     const paintTextOps=new Set([OPS.showText,OPS.showSpacedText,OPS.nextLineShowText,OPS.nextLineSetSpacingShowText]);
      const result=nativeLayout(content,view,name=>page.getFontInfo?.(name)||{},analysis);layoutStats={columns:result.columns};
-     if(result.lines.some(line=>Math.abs(line.angle)>1)){
-      // Recover rotated text and its colours in reading order; warn about changed layout.
-      children=result.lines.map(line=>new Paragraph({children:line.runs.map(run=>new TextRun({text:run.text,font:line.font,size:Math.round(line.fontSize*2),bold:line.bold,italics:line.italics,color:run.color}))}));lines=result.lines.map(line=>({words:[{text:line.text}]}));positioned=false;warnings.push('rotatedLayout');
-     }else{
-      let background;
+      let background;let objects=[];let excludedLines=new Set();
       if(hasGraphics){
-       const canvas=await renderPageCanvas(page,{signal,dpi:216,operationsFilter:index=>!paintTextOps.has(operators.fnArray[index])});
-       try{const png=await new Promise(resolve=>canvas.toBlob(resolve,'image/png'));if(!png)throw new UserError(t('errorImage'));background=new Uint8Array(await png.arrayBuffer());checkAbort(signal);}finally{canvas.width=canvas.height=0;}
-       warnings.push('visualLayer');
+       const visuals=await extractVisuals(page,operators,OPS,view,renderPageCanvas,{signal,lines:result.lines});
+       background=visuals.background;objects=visuals.objects;excludedLines=visuals.excludedLines||new Set();
+       if(background)warnings.push('visualLayer');
+       if(objects.length)warnings.push('visualObjects');
+       if(objects.some(o=>o.vector))warnings.push('diagramImage');
+       if(visuals.flattened)warnings.push('visualComposite');
+       if(visuals.limited)warnings.push('visualLimit');
       }
       pageBackground=background?backgroundParagraph(background,view):null;
-      children=[pageAnchor(),...flowingContent(result.lines,view)];
+      const anchor=pageAnchor();objects.forEach((object,index)=>anchor.addChildElement(visualRun(object,t,index+1)));
+     if(result.lines.some(line=>Math.abs(line.angle)>1)){
+      // Recover rotated text and its colours in reading order; warn about changed layout.
+      children=[anchor,...result.lines.map(line=>new Paragraph({children:line.runs.map(run=>new TextRun({text:run.text,font:line.font,size:Math.round(line.fontSize*2),bold:line.bold,italics:line.italics,color:run.color}))}))];lines=result.lines.map(line=>({words:[{text:line.text}]}));positioned=false;warnings.push('rotatedLayout');
+     }else{
+      children=[anchor,...flowingContent(result.lines.filter(line=>!excludedLines.has(line)),view)];
       lines=result.lines.map(line=>({words:[{text:line.text}]}));adjustments.push('positionedLayout');
      }
     }
@@ -113,7 +118,10 @@ export async function convertDocument(source,{signal,onProgress=()=>{},t=transla
       const result=ocrParagraphs(recognition.data,number,t);note=t('wordPrefix',{page:number})+result.note;
       if(recognition.width!==prepared.width)outputView={width:view.height,height:view.width};
       const layout=scanLayout(recognition.data,recognition.width,recognition.height,outputView);layoutStats={columns:layout.columns};
-      children=[pageAnchor(),...flowingContent(layout.lines,outputView)];
+      const visuals=await extractScanVisuals(original,recognition,outputView,{signal});
+      const scanAnchor=pageAnchor();visuals.objects.forEach((object,index)=>scanAnchor.addChildElement(visualRun(object,t,index+1)));
+      if(visuals.objects.length)warnings.push('scanVisuals','visualObjects');
+      children=[scanAnchor,...flowingContent(outsideVisuals(layout.lines,visuals.objects),outputView)];
       if(!layout.lines.length)children.push(new Paragraph({children:[new TextRun({text:t('wordEmpty'),size:22})]}));
       lines=(recognition.data.blocks||[]).flatMap(block=>(block.paragraphs||[]).flatMap(paragraph=>paragraph.lines||[])).map(line=>({words:(line.words||[]).filter(word=>word.text?.trim()).map(word=>({text:word.text,confidence:word.confidence}))}));
       if(result.alert)alerts.push(result.alert);

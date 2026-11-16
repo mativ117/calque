@@ -36,7 +36,7 @@ test('lecture réelle d’un scan : réseau local en lecture, aucun stockage doc
 });
 for(const file of ['document.png','document.jpg'])test('image de document acceptée : '+file,async({page})=>{
  await page.goto('./');await select(page,file);const zip=await convert(page);
- expect(await zip.file('word/document.xml').async('string')).toContain('Bonjour');await expect(page.locator('#review')).toBeVisible();await expect(page.locator('#alert-list')).toContainText('ne sont pas reconstruites');
+ expect(await zip.file('word/document.xml').async('string')).toContain('Bonjour');await expect(page.locator('#review')).toBeVisible();await expect(page.locator('#alert-list')).toContainText('couleurs du texte');
 });
 test('tableau non reconstruit : perte explicitement signalée dans le bilan et le Word',async({page})=>{
  await page.goto('./');await select(page,'tableau.pdf');const zip=await convert(page);
@@ -144,14 +144,40 @@ test('CV fictif : colonnes, styles, photo et fonds sans texte aplati',async({pag
  expect(xml).not.toContain('Page d’origine');expect(xml).not.toContain('couche image');
  expect(await zip.file('word/comments.xml').async('string')).toContain('couche image');
  const pngs=Object.keys(zip.files).filter(name=>name.startsWith('word/media/')&&name.endsWith('.png'));
- expect(pngs).toHaveLength(2);
+ expect(pngs.length).toBeGreaterThanOrEqual(2);expect(xml).toContain('Visuel 1');expect(xml).toContain('relativeFrom="page"');
+ expect(await zip.file('word/comments.xml').async('string')).toContain('images Word sélectionnables');
  for(const name of pngs){
   const pixels=await page.evaluate(async base64=>{
    const img=new Image();img.src='data:image/png;base64,'+base64;await img.decode();
-   const c=document.createElement('canvas');c.width=img.width;c.height=img.height;const ctx=c.getContext('2d');ctx.drawImage(img,0,0);
+   const c=document.createElement('canvas');c.width=img.width;c.height=img.height;const ctx=c.getContext('2d');ctx.fillStyle='white';ctx.fillRect(0,0,c.width,c.height);ctx.drawImage(img,0,0);
+   if(Math.abs(img.width/img.height-595/842)>.02)return {object:true,width:img.width,height:img.height};
    const inspect=(x,y,w,h,light)=>{const sx=img.width/595,sy=img.height/842;const d=ctx.getImageData(Math.ceil(x*sx),Math.ceil(y*sy),Math.floor(w*sx),Math.floor(h*sy)).data;let bad=0;for(let i=0;i<d.length;i+=4)if(light?d[i]<245:d[i]>40)bad++;return bad;};
    return {title:inspect(36,32,230,24,true),sidebar:inspect(418,173,160,28,false)};
   },await zip.file(name).async('base64'));
-  expect(pixels).toEqual({title:0,sidebar:0});
+  if(pixels.object){expect(pixels.width).toBeGreaterThan(20);expect(pixels.height).toBeGreaterThan(20);}else expect(pixels).toEqual({title:0,sidebar:0});
  }
+});
+
+for(const [language,word,warning] of [['fr','Visuel 1','images Word sélectionnables'],['en','Visual 1','Word images you can select'],['nl','Afbeelding 1','Word-afbeeldingen die u kunt selecteren']])test('photo sélectionnable et commentaires traduits : '+language,async({page})=>{
+ await page.goto('./?lang='+language);await select(page,'cv-columns.pdf');const zip=await convert(page);
+ const xml=await zip.file('word/document.xml').async('string'),comments=await zip.file('word/comments.xml').async('string');
+ expect(xml).toContain(word);expect(comments).toContain(warning);expect(xml).not.toContain(warning);
+ const objectNames=Object.keys(zip.files).filter(n=>n.startsWith('word/media/')&&n.endsWith('.png'));
+ let circular=false;
+ for(const name of objectNames){const value=await page.evaluate(async data=>{const img=new Image();img.src='data:image/png;base64,'+data;await img.decode();if(img.width/img.height<.9||img.width/img.height>1.1)return false;const c=document.createElement('canvas');c.width=img.width;c.height=img.height;const ctx=c.getContext('2d');ctx.drawImage(img,0,0);return ctx.getImageData(0,0,1,1).data[3]===0&&ctx.getImageData(Math.floor(c.width/2),Math.floor(c.height/2),1,1).data[3]>240;},await zip.file(name).async('base64'));circular||=value;}
+ expect(circular).toBe(true);
+});
+test('schéma : formes, connecteur et textes intégrés restent ensemble',async({page})=>{
+ await page.goto('./');await select(page,'diagram.pdf');const zip=await convert(page),xml=await zip.file('word/document.xml').async('string');
+ expect(xml).toContain('Editable paragraph outside diagram.');expect(xml).toContain('Visuel 1');expect(xml).not.toContain('>Source<');expect(xml).not.toContain('>Target<');
+ expect(await zip.file('word/comments.xml').async('string')).toContain('textes intégrés au schéma');await expect(page.locator('#text-preview')).toContainText('Source');
+});
+test('scan illustré : image Word séparée et limite de détection signalée',async({page})=>{
+ await page.goto('./');await select(page,'scan-picture.png');const zip=await convert(page),xml=await zip.file('word/document.xml').async('string');expect(xml).toContain('Bonjour');expect(xml).toContain('Visuel 1');
+ expect(await zip.file('word/comments.xml').async('string')).toContain('détection est indicative');await expect(page.locator('#review-warnings')).toContainText('détection est indicative');
+});
+
+test('superposition complexe : apparence groupée et avertissement contextualisé',async({page})=>{
+ await page.goto('./');await select(page,'overlay.pdf');const zip=await convert(page);const xml=await zip.file('word/document.xml').async('string');
+ expect(xml).toContain('Editable overlay test');expect(xml).toContain('Visuel 1');expect(await zip.file('word/comments.xml').async('string')).toContain('effets ou superpositions');await expect(page.locator('#review-warnings')).toContainText('déplacer peut laisser');
 });
