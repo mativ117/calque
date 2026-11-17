@@ -34,7 +34,7 @@ La vérification de structure ne certifie ni la pagination réelle après ouvert
 - Comparaison de la recomposition des couches graphiques avec leur rendu de référence. Si les effets ou superpositions ne se séparent pas proprement, le groupe conserve une découpe de son décor et une alerte explique la limite. Ce contrôle utilise PDF.js des deux côtés et ne certifie pas le rendu Microsoft Word.
 - Au plus 16 groupes isolés par page PDF ; les très grands fonds, filets et groupes supplémentaires restent dans le fond. Les limites déclenchent une alerte lorsque détectées.
 - Pour les scans, détection conservatrice de régions graphiques après exclusion des mots reconnus, au plus 8 régions par page. Les illustrations sont découpées dans l’image d’origine. Après une correction automatique de légère inclinaison, l’extraction de visuels est omise pour éviter une découpe décalée. Les alertes de scan expliquent les omissions possibles.
-- Objets liés à leur page et placés derrière le texte pour éviter de le masquer. Word permet de les sélectionner, notamment via son volet de sélection. Les ajouts importants peuvent modifier la pagination ; vérifier le placement des objets et les fonds.
+- Les images indépendantes compatibles sont désormais placées dans le flux ; les superpositions complexes restent liées à leur page et placées derrière le texte. Word permet de les sélectionner, notamment via son volet de sélection. Les ajouts importants peuvent modifier la pagination ; vérifier le placement des objets et les fonds.
 - Avertissements contextuels dans le bilan et les commentaires Word, descriptions alternatives des images dans les trois langues. Aucun avertissement ajouté au contenu visible des pages.
 
 ## Confidentialité et sécurité
@@ -97,3 +97,9 @@ Les limites restent **50 Mo par fichier et 150 pages par PDF**. L’aide de l’
 - Garde-fou supplémentaire de 2 000 000 unités UTF-16 de texte par conversion, pour limiter les documents anormalement denses. Un dépassement demande un intervalle plus court ou une copie plus légère. Ce garde-fou ne garantit pas l’absence d’épuisement mémoire.
 
 Les scénarios synthétiques comprennent un PDF texte de 150 pages avec vérification de chaque identifiant de page, le refus de 151 pages, un intervalle de trois pages avec contrôle de numérotation, l’annulation d’une lecture lente et un scan de treize pages qui franchit le renouvellement du moteur. Les durées sont consignées dans les logs des tests, pour l’environnement de test uniquement. Ils ne constituent pas un benchmark sur les appareils des utilisateurs ni une validation de 150 pages scannées.
+
+## Gestion des chevauchements
+
+L’interligne Word est extensible et tient compte du plus grand caractère de chaque paragraphe. Les fragments éloignés sur une même ligne PDF ne sont plus fusionnés par un simple espace. Les images indépendantes qui tiennent dans une colonne sont insérées dans le flux, avec un paragraphe qui réserve leur hauteur : elles suivent le texte après des ajouts. Elles peuvent être légèrement réduites pour tenir dans la colonne. La pagination peut évoluer.
+
+Les grilles, superpositions intentionnelles et visuels traversant des colonnes gardent un placement fixe avec un avertissement ciblé dans le bilan et les commentaires Word (français, anglais et néerlandais). Les fonds restent fixes. La détection s’appuie sur la géométrie du PDF ; elle ne remplace pas une vérification du rendu et ne garantit pas l’absence de tout chevauchement dans Word.

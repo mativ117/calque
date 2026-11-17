@@ -92,9 +92,9 @@ export async function extractVisuals(page,operators,ops,view,render,{signal,line
  }catch(error){checkAbort(signal);if(!reference.width)throw error;return {background:await png(reference),objects:[],limited:true,flattened:false,excludedLines:labelsInReference?excludedLines:new Set()};
  }finally{reference.width=reference.height=0;if(residual)residual.width=residual.height=0;if(composite)composite.width=composite.height=0;for(const canvas of temporary)canvas.width=canvas.height=0;}
 }
-export function visualRun(object,t,index){
+export function visualRun(object,t,index,{inline=false}={}){
  const box=object.box;
- return new ImageRun({type:'png',data:object.data,altText:{name:t('visualName',{index}),description:t(object.kind==='picture'?'visualPictureDescription':object.kind==='scan'?'visualScanDescription':'visualDiagramDescription'),title:t('visualName',{index})},transformation:{width:box.width*96/72,height:box.height*96/72},floating:{horizontalPosition:{relative:'page',offset:Math.round(box.x*12700)},verticalPosition:{relative:'page',offset:Math.round(box.y*12700)},allowOverlap:true,behindDocument:true,layoutInCell:false,zIndex:100+index,wrap:{type:'none'}}});
+ return new ImageRun({type:'png',data:object.data,altText:{name:t('visualName',{index}),description:t(object.kind==='picture'?'visualPictureDescription':object.kind==='scan'?'visualScanDescription':'visualDiagramDescription'),title:t('visualName',{index})},transformation:{width:box.width*96/72,height:box.height*96/72},...(inline?{}:{floating:{horizontalPosition:{relative:'page',offset:Math.round(box.x*12700)},verticalPosition:{relative:'page',offset:Math.round(box.y*12700)},allowOverlap:true,behindDocument:true,layoutInCell:false,zIndex:100+index,wrap:{type:'none'}}})});
 }
 // Conservative scan segmentation: remove recognised word rectangles from a small
 // working image, then retain sizeable connected graphic regions. This is a

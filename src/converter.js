@@ -1,5 +1,5 @@
 import {extractVisuals,extractScanVisuals,outsideVisuals,visualRun} from './visual-objects.js';
-import {flowingContent} from './flow-layout.js';
+import {flowingContent,partitionVisuals} from './flow-layout.js';
 import { OPS } from 'pdfjs-dist';
 import { createWorker } from 'tesseract.js';
 import { translator, UserError } from './i18n.js';
@@ -91,12 +91,19 @@ export async function convertDocument(source,{signal,onProgress=()=>{},t=transla
        if(visuals.limited)warnings.push('visualLimit');
       }
       pageBackground=background?backgroundParagraph(background,view):null;
-      const anchor=pageAnchor();objects.forEach((object,index)=>anchor.addChildElement(visualRun(object,t,index+1)));
+      const flowLines=result.lines.filter(line=>!excludedLines.has(line));
+      const placement=partitionVisuals(flowLines,objects,view);
+      if(placement.floating.length)warnings.push('layoutReview');
+      if(placement.inline.length)adjustments.push('visualFlow');
+      const anchor=pageAnchor();
+      placement.floating.forEach(object=>anchor.addChildElement(visualRun(object,t,object.index)));
      if(result.lines.some(line=>Math.abs(line.angle)>1)){
+      placement.inline.forEach(object=>anchor.addChildElement(visualRun(object,t,object.index)));
+      if(objects.length)warnings.push('layoutReview');
       // Recover rotated text and its colours in reading order; warn about changed layout.
       children=[anchor,...result.lines.map(line=>new Paragraph({children:line.runs.map(run=>new TextRun({text:run.text,font:line.font,size:Math.round(line.fontSize*2),bold:line.bold,italics:line.italics,color:run.color}))}))];lines=result.lines.map(line=>({words:[{text:line.text}]}));positioned=false;warnings.push('rotatedLayout');
      }else{
-      children=[anchor,...flowingContent(result.lines.filter(line=>!excludedLines.has(line)),view)];
+      children=[anchor,...flowingContent(flowLines,view,{objects:placement.inline,t})];
       lines=result.lines.map(line=>({words:[{text:line.text}]}));adjustments.push('positionedLayout');
      }
     }
@@ -119,9 +126,12 @@ export async function convertDocument(source,{signal,onProgress=()=>{},t=transla
       if(recognition.width!==prepared.width)outputView={width:view.height,height:view.width};
       const layout=scanLayout(recognition.data,recognition.width,recognition.height,outputView);layoutStats={columns:layout.columns};
       const visuals=await extractScanVisuals(original,recognition,outputView,{signal});
-      const scanAnchor=pageAnchor();visuals.objects.forEach((object,index)=>scanAnchor.addChildElement(visualRun(object,t,index+1)));
+      const scanLines=outsideVisuals(layout.lines,visuals.objects),placement=partitionVisuals(scanLines,visuals.objects,outputView);
+      const scanAnchor=pageAnchor();placement.floating.forEach(object=>scanAnchor.addChildElement(visualRun(object,t,object.index)));
+      if(placement.floating.length)warnings.push('layoutReview');
+      if(placement.inline.length)adjustments.push('visualFlow');
       if(visuals.objects.length)warnings.push('scanVisuals','visualObjects');
-      children=[scanAnchor,...flowingContent(outsideVisuals(layout.lines,visuals.objects),outputView)];
+      children=[scanAnchor,...flowingContent(scanLines,outputView,{objects:placement.inline,t})];
       if(!layout.lines.length)children.push(new Paragraph({children:[new TextRun({text:t('wordEmpty'),size:22})]}));
       lines=(recognition.data.blocks||[]).flatMap(block=>(block.paragraphs||[]).flatMap(paragraph=>paragraph.lines||[])).map(line=>({words:(line.words||[]).filter(word=>word.text?.trim()).map(word=>({text:word.text,confidence:word.confidence}))}));
       if(result.alert)alerts.push(result.alert);

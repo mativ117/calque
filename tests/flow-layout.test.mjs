@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {Document,Packer} from 'docx';
 import JSZip from 'jszip';
-import {flowBlocks,flowingContent} from '../src/flow-layout.js';
+import {flowBlocks,flowingContent,partitionVisuals} from '../src/flow-layout.js';
 const line=(text,x,y,color='242424',extra={})=>({text,x,baseline:y,width:140,fontSize:10,font:'Arial',bold:false,italics:false,runs:[{text,color}],...extra});
 test('paragraphes continus : conserve les couleurs au-delà des retours PDF',()=>{
  const blocks=flowBlocks([line('First line',36,50,'C97940'),line('second line',36,62,'EEEEEE'),line('New paragraph',36,90)]);
@@ -21,4 +21,21 @@ test('Word en flux : sans cadres, paragraphes et couleurs, colonnes structurées
  const doc=new Document({sections:[{children:flowingContent(lines,{width:595,height:842})}]});
  const zip=await JSZip.loadAsync(await Packer.toBuffer(doc));const xml=await zip.file('word/document.xml').async('string');
  assert(!xml.includes('w:framePr'));assert(!xml.includes('w:txbxContent'));assert(xml.includes('<w:tbl>'));assert(xml.includes('C97940'));assert(xml.includes('EEEEEE'));assert(xml.includes('continues here'));
+});
+
+test('fragments séparés par un grand espace ne deviennent pas une ligne unique',()=>{
+ const blocks=flowBlocks([line('Left label',30,50,'242424',{width:50}),line('Right label',300,50)]);assert.equal(blocks.length,2);
+});
+test('grandes lettres et image : interligne extensible et place réservée dans le flux',async()=>{
+ const lines=[line('small',36,50,'242424',{width:25}),line('BIG',65,50,'C97940',{fontSize:28,width:60}),line('After picture',36,200)];
+ const picture={data:Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aT1kAAAAASUVORK5CYII=','base64'),box:{x:36,y:80,width:90,height:90},index:1,kind:'picture'};
+ const {translator}=await import('../src/i18n.js');
+ const doc=new Document({sections:[{children:flowingContent(lines,{width:595,height:842},{objects:[picture],t:translator('fr')})}]});
+ const zip=await JSZip.loadAsync(await Packer.toBuffer(doc));const xml=await zip.file('word/document.xml').async('string');
+ assert(xml.includes('w:line="672" w:lineRule="atLeast"'));assert(!xml.includes('w:lineRule="exact"'));assert(xml.includes('<wp:inline'));assert(!xml.includes('<wp:anchor'));assert(xml.indexOf('BIG')<xml.indexOf('<wp:inline'));assert(xml.indexOf('<wp:inline')<xml.indexOf('After picture'));assert(xml.includes('C97940'));
+});
+test('les superpositions intentionnelles et visuels entre colonnes restent signalables',()=>{
+ const lines=[line('Left',30,50),line('Right',420,50)];
+ const objects=[{box:{x:30,y:100,width:90,height:90}},{box:{x:20,y:30,width:180,height:40}},{box:{x:200,y:250,width:250,height:50}}];
+ const result=partitionVisuals(lines,objects,{width:595,height:842});assert.equal(result.inline.length,1);assert.equal(result.floating.length,2);assert.equal(result.inline[0].index,1);
 });
